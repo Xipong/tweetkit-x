@@ -51,9 +51,17 @@ class TweetKit:
     def _transaction(self):
         """Lazily build the transaction-id generator (fetches x.com home once)."""
         if self._ct is None:
-            home = handle_x_migration(self._session)
-            od = requests.get(get_ondemand_file_url(home),
-                              headers=dict(self._session.headers), timeout=self.timeout)
+            # Since the Sept 2026 x-web homepage migration, x.com/ and /home no longer
+            # reference ondemand.s; /i/jf/ still serves the full bundle manifest.
+            # Upstream: iSarabjitDhiman/XClientTransaction (unreleased fix, 2026-09-28).
+            home = BeautifulSoup(self._session.get(
+                "https://x.com/i/jf/", timeout=self.timeout).text, "html.parser")
+            try:
+                od_url = get_ondemand_file_url(home)
+            except AttributeError:
+                home = handle_x_migration(self._session)
+                od_url = get_ondemand_file_url(home)
+            od = requests.get(od_url, headers=dict(self._session.headers), timeout=self.timeout)
             self._ct = ClientTransaction(home, BeautifulSoup(od.text, "html.parser"))
         return self._ct
 
