@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tweetkit-x"
-version = "0.3.1"
-description = "Post, delete & read on X (Twitter) from Python & MCP using your own web session — no paid API."
-readme = "README.md"
+version = "0.4.0"
+description = "X web-session client and read-only ChatGPT research connector — no paid X API."
+readme = "CHATGPT_SETUP_RU.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 authors = [{ name = "ns0bj" }]
-keywords = ["twitter", "x", "mcp", "tweet", "automation", "web-session"]
+keywords = ["twitter", "x", "mcp", "research", "chatgpt", "web-session"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License",
@@ -25,16 +25,23 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.2.0"]
+mcp = ["mcp>=1.28,<2"]
+research = ["mcp>=1.28,<2", "uvicorn>=0.30,<1"]
+browser = ["curl-cffi>=0.11,<1"]
+test = ["pytest>=8,<10", "httpx>=0.27,<1", "anyio>=4,<5", "jsonschema>=4,<5"]
 
 [project.scripts]
 tweetkit = "tweetkit_x.cli:main"
 tweetkit-mcp = "tweetkit_x.mcp_server:main"
+tweetkit-research = "tweetkit_x.research_server:main"
 
 [project.urls]
-Homepage = "https://github.com/nsozturk/tweetkit-x"
-Repository = "https://github.com/nsozturk/tweetkit-x"
-Issues = "https://github.com/nsozturk/tweetkit-x/issues"
+Homepage = "https://github.com/Xipong/tweetkit-x"
+Repository = "https://github.com/Xipong/tweetkit-x"
+Issues = "https://github.com/Xipong/tweetkit-x/issues"
 
 [tool.setuptools]
 packages = ["tweetkit_x"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

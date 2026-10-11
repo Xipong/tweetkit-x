@@ -1,0 +1,10 @@
+FROM python:3.12-slim
+WORKDIR /app
+COPY pyproject.toml LICENSE CHATGPT_SETUP_RU.md ./
+COPY tweetkit_x ./tweetkit_x
+RUN pip install --no-cache-dir '.[research,browser]' \
+    && useradd --create-home --uid 10001 research
+USER research
+ENV PYTHONUNBUFFERED=1
+ENTRYPOINT ["tweetkit-research"]
+CMD ["--transport", "stdio"]
