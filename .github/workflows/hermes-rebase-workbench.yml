@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - .github/workflows/hermes-rebase-workbench.yml
+  pull_request:
+    types: [opened, reopened, synchronize]
+    paths:
+      - .github/hermes-rebase-trigger.txt
   issues:
     types: [opened, reopened]
 
@@ -18,7 +22,7 @@ concurrency:
 
 jobs:
   rebase:
-    if: github.event_name == 'push' || github.event.issue.title == 'Hermes rebase workbench 2026-10-15'
+    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event.issue.title == 'Hermes rebase workbench 2026-10-15'
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
