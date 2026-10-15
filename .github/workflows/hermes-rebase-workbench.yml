@@ -75,6 +75,7 @@ jobs:
             test "$actual_head" = "$expected_head"
             base_ref="refs/remotes/upstream/${base_branch}"
             base_head="$(git -C "$repo" rev-parse "$base_ref")"
+            base_tree="$(git -C "$repo" rev-parse "${base_head}^{tree}")"
             merge_base="$(git -C "$repo" merge-base "$actual_head" "$base_head")"
 
             pr_out="$out/pr-${pr}"
@@ -86,6 +87,7 @@ jobs:
               "expected_head=${expected_head}" \
               "base_branch=${base_branch}" \
               "base_head=${base_head}" \
+              "base_tree=${base_tree}" \
               "merge_base=${merge_base}" \
               > "$pr_out/metadata.txt"
 
@@ -144,16 +146,31 @@ jobs:
             git -C "$repo" diff --binary --full-index "$base_head"...HEAD > "$pr_out/final.diff"
 
             : > "$pr_out/manifest.tsv"
+            : > "$pr_out/object-manifest.tsv"
             while IFS= read -r -d '' path; do
               entry="$(git -C "$repo" ls-tree HEAD -- "$path")"
               if [[ -z "$entry" ]]; then
                 printf 'delete\t-\t%s\n' "$path" >> "$pr_out/manifest.tsv"
+                printf 'delete\t-\t-\tdelete\t%s\n' "$path" >> "$pr_out/object-manifest.tsv"
                 continue
               fi
+
               mode="${entry%% *}"
+              final_blob="$(git -C "$repo" rev-parse "HEAD:${path}")"
+              base_blob="$(git -C "$repo" rev-parse "${base_head}:${path}" 2>/dev/null || true)"
+              source_blob="$(git -C "$repo" rev-parse "${actual_head}:${path}" 2>/dev/null || true)"
+              object_source=new
+              if [[ "$final_blob" == "$base_blob" ]]; then
+                object_source=base
+              elif [[ "$final_blob" == "$source_blob" ]]; then
+                object_source=source
+              fi
+
               mkdir -p "$pr_out/files/$(dirname "$path")"
               git -C "$repo" show "HEAD:${path}" > "$pr_out/files/${path}"
               printf 'upsert\t%s\t%s\n' "$mode" "$path" >> "$pr_out/manifest.tsv"
+              printf 'upsert\t%s\t%s\t%s\t%s\n' \
+                "$mode" "$final_blob" "$object_source" "$path" >> "$pr_out/object-manifest.tsv"
             done < <(git -C "$repo" diff --name-only -z "$base_head"...HEAD)
           done
 
