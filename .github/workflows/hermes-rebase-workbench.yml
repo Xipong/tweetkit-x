@@ -1,28 +1,20 @@
 name: Hermes Rebase Workbench
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/hermes-rebase-workbench.yml
   pull_request:
     types: [opened, reopened, synchronize]
     paths:
       - .github/hermes-rebase-trigger.txt
-  issues:
-    types: [opened, reopened]
 
 permissions:
   contents: write
-  issues: read
 
 concurrency:
   group: hermes-rebase-workbench-20261015
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   rebase:
-    if: github.event_name == 'push' || github.event_name == 'pull_request' || github.event.issue.title == 'Hermes rebase workbench 2026-10-15'
     runs-on: ubuntu-latest
     timeout-minutes: 120
 
@@ -52,7 +44,6 @@ jobs:
           git -C "$repo" config rerere.enabled true
 
           prs=(106252 106917 107299 107350 107713 123218)
-
           git -C "$repo" fetch --filter=blob:none --no-tags upstream \
             +refs/heads/main:refs/remotes/upstream/main \
             +refs/heads/muse-code-inspired/peer-session-messaging:refs/remotes/upstream/muse-code-inspired/peer-session-messaging
@@ -100,47 +91,42 @@ jobs:
 
             git -C "$repo" checkout -B "work-${pr}" "$actual_head"
             : > "$pr_out/conflict-resolutions.txt"
+            : > "$pr_out/rebase.log"
 
             if git -C "$repo" merge-base --is-ancestor "$base_head" HEAD; then
               echo "already_current=true" >> "$pr_out/metadata.txt"
-              : > "$pr_out/rebase.log"
             else
               set +e
-              GIT_EDITOR=true git -C "$repo" rebase --rebase-merges --empty=drop -X theirs --onto "$base_head" "$merge_base" \
-                >"$pr_out/rebase.log" 2>&1
+              GIT_EDITOR=true git -C "$repo" rebase --rebase-merges --empty=drop -X theirs \
+                --onto "$base_head" "$merge_base" >"$pr_out/rebase.log" 2>&1
               rc=$?
               set -e
+              git_dir="$(git -C "$repo" rev-parse --absolute-git-dir)"
 
-              while [[ $rc -ne 0 ]] && { test -d "$(git -C "$repo" rev-parse --git-path rebase-merge)" || test -d "$(git -C "$repo" rev-parse --git-path rebase-apply)"; }; do
+              while [[ $rc -ne 0 ]] && { [[ -d "$git_dir/rebase-merge" ]] || [[ -d "$git_dir/rebase-apply" ]]; }; do
                 mapfile -d '' conflicts < <(git -C "$repo" diff --name-only --diff-filter=U -z)
-                if [[ ${#conflicts[@]} -eq 0 ]]; then
-                  cat "$pr_out/rebase.log" >&2
-                  echo "Rebase stopped without unmerged paths for PR ${pr}" >&2
-                  exit 60
+
+                if [[ ${#conflicts[@]} -gt 0 ]]; then
+                  for path in "${conflicts[@]}"; do
+                    if git -C "$repo" cat-file -e ":3:${path}" 2>/dev/null; then
+                      git -C "$repo" checkout --theirs -- "$path"
+                      git -C "$repo" add -- "$path"
+                      printf 'prefer-pr\t%s\n' "$path" >> "$pr_out/conflict-resolutions.txt"
+                    else
+                      git -C "$repo" rm -f --ignore-unmatch -- "$path"
+                      printf 'accept-pr-delete\t%s\n' "$path" >> "$pr_out/conflict-resolutions.txt"
+                    fi
+                  done
                 fi
 
-                for path in "${conflicts[@]}"; do
-                  if git -C "$repo" cat-file -e ":3:${path}" 2>/dev/null; then
-                    git -C "$repo" checkout --theirs -- "$path"
-                    git -C "$repo" add -- "$path"
-                    printf 'prefer-pr\t%s\n' "$path" >> "$pr_out/conflict-resolutions.txt"
-                  else
-                    git -C "$repo" rm -f --ignore-unmatch -- "$path"
-                    printf 'accept-pr-delete\t%s\n' "$path" >> "$pr_out/conflict-resolutions.txt"
-                  fi
-                done
-
+                set +e
                 if git -C "$repo" diff --cached --quiet; then
-                  set +e
                   GIT_EDITOR=true git -C "$repo" rebase --skip >>"$pr_out/rebase.log" 2>&1
-                  rc=$?
-                  set -e
                 else
-                  set +e
                   GIT_EDITOR=true git -C "$repo" rebase --continue >>"$pr_out/rebase.log" 2>&1
-                  rc=$?
-                  set -e
                 fi
+                rc=$?
+                set -e
               done
 
               if [[ $rc -ne 0 ]]; then
