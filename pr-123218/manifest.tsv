@@ -1,0 +1,7 @@
+upsert	100644	tests/tools/test_peer_messaging.py
+upsert	100644	tests/tools/test_peer_messaging_delivery.py
+upsert	100644	tests/tools/test_peer_messaging_mailbox.py
+upsert	100644	tests/tools/test_peer_messaging_scope.py
+upsert	100644	tools/peer_messaging_mailbox.py
+upsert	100644	tools/peer_messaging_tool.py
+upsert	100644	website/docs/user-guide/features/peer-messaging.md

@@ -1,0 +1,10 @@
+pr=106252
+title=fix(tts): preserve local paragraph pauses as explicit speech segments
+source_branch=fix/tts-paragraph-segments
+expected_head=2b9f559fdcd4a35b65888a21c15048c70fb085a1
+base_branch=main
+base_head=ecac27c0af86064c40eeb8097cc20377cf2eee12
+base_tree=3286140958a4b9d626010749a9f7465cb91d8ebe
+merge_base=990473a79c6b0396b0a648fdd85ee8f7a5c267d3
+already_current=false
+new_head=a33ad8d5d9feb024ab13ee70d3f0ddf85a80b71c

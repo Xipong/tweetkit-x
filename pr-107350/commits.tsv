@@ -1,0 +1,6 @@
+a66262cac1c7f4235fbfa3f20f070eb5cb6858dd	ecac27c0af86064c40eeb8097cc20377cf2eee12	Xipong	Cosmiclady@yandex.ru	fix(codex): render CLI commentary outside reasoning
+a06fb806dfcedd0a621fb429164330960bd4116d	a66262cac1c7f4235fbfa3f20f070eb5cb6858dd	Xipong	Cosmiclady@yandex.ru	fix(cli): keep interim messages independent of tool progress
+9d1e3d844b0597a61d613276ae0574cde737de39	a06fb806dfcedd0a621fb429164330960bd4116d	Xipong	Cosmiclady@yandex.ru	test(cli): keep interim messages independent of tool progress
+f139913caa05eba532de549fe011c05221493d8e	9d1e3d844b0597a61d613276ae0574cde737de39	Xipong	Cosmiclady@yandex.ru	chore(cli): keep commentary patch minimal
+ce5ffc565c04fed238353737ac2aed3a777ea497	f139913caa05eba532de549fe011c05221493d8e	Xipong	Cosmiclady@yandex.ru	fix(cli): preserve quiet stdout with interim commentary
+b6b5c817534f756b51f540428fc38fa3808f061c	ce5ffc565c04fed238353737ac2aed3a777ea497	Xipong	Cosmiclady@yandex.ru	test(cli): pin quiet interim suppression

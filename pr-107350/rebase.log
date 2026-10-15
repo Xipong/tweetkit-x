@@ -1,0 +1,17 @@
+Rebasing (1/8)Rebasing (2/8)Rebasing (3/8)Auto-merging agent/codex_responses_adapter.py
+Auto-merging hermes_cli/cli_agent_setup_mixin.py
+Auto-merging tests/agent/test_run_agent_codex_responses.py
+CONFLICT (file location): tests/cli/test_codex_commentary_channel.py added in a08e5e70ef (fix(codex): render CLI commentary outside reasoning) inside a directory that was renamed in HEAD, suggesting it should perhaps be moved to tests/hermes_cli/test_codex_commentary_channel.py.
+error: could not apply a08e5e70ef... fix(codex): render CLI commentary outside reasoning
+hint: Resolve all conflicts manually, mark them as resolved with
+hint: "git add/rm <conflicted_files>", then run "git rebase --continue".
+hint: You can instead skip this commit: run "git rebase --skip".
+hint: To abort and get back to the state before "git rebase", run "git rebase --abort".
+hint: Disable this message with "git config set advice.mergeConflict false"
+Could not apply a08e5e70ef... # fix(codex): render CLI commentary outside reasoning
+[detached HEAD a66262cac1] fix(codex): render CLI commentary outside reasoning
+ Author: Xipong <Cosmiclady@yandex.ru>
+ 5 files changed, 329 insertions(+), 10 deletions(-)
+ create mode 100644 tests/agent/test_codex_commentary_channels.py
+ create mode 100644 tests/hermes_cli/test_codex_commentary_channel.py
+Rebasing (4/8)Rebasing (5/8)Rebasing (6/8)Rebasing (7/8)Rebasing (8/8)Successfully rebased and updated refs/heads/work-107350.

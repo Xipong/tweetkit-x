@@ -1,0 +1,11 @@
+upsert	100644	c1d2d5ffe80587215e1c1a0b6e5c061846971ea6	new	gateway/platforms/base.py
+upsert	100644	0154f75ac2d33b9cede361b4dd8510102d2fb123	new	hermes_cli/cli_voice_mixin.py
+upsert	100644	2f730aab838d4275efa5affa33a6e400353eb296	new	hermes_cli/config_defaults.py
+upsert	100644	a0d969eb4989e0b3a265dba2f293a208cfa46ecd	new	hermes_cli/voice.py
+upsert	100644	d95b67e69e7f140bd5367338a3f1820768b90740	source	tests/tools/test_tts_paragraph_segments.py
+upsert	100644	faa77f531f61775464579092b1f137d52f8d2e63	new	tools/neutts_synth.py
+upsert	100644	8ca5c737fc3994c857ea0c878501bae93ae0d9aa	new	tools/tts_text_normalize.py
+upsert	100644	c36577f57672ad8ade20e498d270a5749578ccff	new	tools/tts_tool.py
+upsert	100644	667f8ee02d8cd2e1794f698736c98a6e005bebe6	new	tools/tts_tool_local.py
+upsert	100644	c9fa6aa3cb65a74fe31f6598c7be92c67ffb4920	source	tools/tts_tool_segments.py
+upsert	100644	c890f126eb1e93c5883b123544f98a6200f817ee	new	website/docs/user-guide/features/tts.md

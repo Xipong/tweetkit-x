@@ -1,0 +1,7 @@
+M	agent/context_breakdown.py
+A	apps/desktop/src/app/shell/hooks/use-statusbar-items.gauge.test.tsx
+M	apps/desktop/src/app/shell/hooks/use-statusbar-items.lifecycle.test.tsx
+M	apps/desktop/src/app/shell/hooks/use-statusbar-items.tsx
+M	tests/agent/test_context_display_provenance.py
+M	tests/tui_gateway/test_tui_gateway_server.py
+M	tui_gateway/server.py

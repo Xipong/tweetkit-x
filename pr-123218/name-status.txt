@@ -1,0 +1,7 @@
+M	tests/tools/test_peer_messaging.py
+A	tests/tools/test_peer_messaging_delivery.py
+A	tests/tools/test_peer_messaging_mailbox.py
+A	tests/tools/test_peer_messaging_scope.py
+A	tools/peer_messaging_mailbox.py
+M	tools/peer_messaging_tool.py
+A	website/docs/user-guide/features/peer-messaging.md

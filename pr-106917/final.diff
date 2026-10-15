@@ -1,0 +1,463 @@
+diff --git a/agent/context_breakdown.py b/agent/context_breakdown.py
+index 6d9fedec6c53575faea6a02839bb27397f0c107e..04fc219eb7d920dfe11a4ff48af59549350164df 100644
+--- a/agent/context_breakdown.py
++++ b/agent/context_breakdown.py
+@@ -127,14 +127,49 @@ def context_display_source(compressor: Any) -> str:
+     return "local_estimate" if isinstance(real, (int, float)) and shown > 0 and shown != real else "provider_usage"
+ 
+ 
+-def context_usage_fields(compressor: Any) -> dict[str, Any]:
++def resolve_context_usage(
++    agent: Any,
++    messages: List[dict],
++    *,
++    estimated_fallback: int = 0,
++) -> Tuple[int, str]:
++    """Resolve live occupancy without computing the category breakdown."""
++    from agent.usage_anchor import anchored_context_tokens
++
++    anchor = getattr(agent, "_turn_base_usage_anchor", None)
++    used = anchored_context_tokens(messages, anchor, charge_stale_thinking=False)
++    if used is None:
++        anchor = getattr(agent, "_usage_anchor", None)
++        used = anchored_context_tokens(messages, anchor)
++    if used is not None:
++        assert isinstance(anchor, dict)  # anchored_context_tokens accepted it
++        delta = messages[int(anchor["base_count"]):]
++        if delta and isinstance(delta[0], dict) and delta[0].get("role") == "assistant":
++            delta = delta[1:]
++        return used, "provider_usage_plus_estimate" if delta else "provider_usage"
++
++    compressor = getattr(agent, "context_compressor", None)
++    measured = max(0, getattr(compressor, "last_prompt_tokens", 0) or 0)
++    if measured > 0:
++        return measured, context_display_source(compressor)
++    return max(0, estimated_fallback), "local_estimate"
++
++
++def context_usage_fields(
++    compressor: Any,
++    *,
++    agent: Any = None,
++    messages: Optional[List[dict]] = None,
++) -> Dict[str, Any]:
+     """Current occupancy only; lifetime throughput is never a context fallback."""
+-    used = max(0, getattr(compressor, "last_prompt_tokens", 0) or 0)
++    if agent is not None and isinstance(messages, list):
++        used, source = resolve_context_usage(agent, messages)
++    else:
++        used = max(0, getattr(compressor, "last_prompt_tokens", 0) or 0)
++        source = context_display_source(compressor)
+     maximum = getattr(compressor, "context_length", 0) or 0
+     if not used or not maximum:
+         return {}
+-    used = min(used, maximum)
+-    source = context_display_source(compressor)
+     return {"context_used": used, "context_max": maximum,
+             "context_percent": max(0, min(100, round(used / maximum * 100))),
+             "context_source": source, "context_estimated": source != "provider_usage"}
+@@ -143,7 +178,6 @@ def context_usage_fields(compressor: Any) -> dict[str, Any]:
+ def compute_session_context_breakdown(agent: Any, messages: Optional[list[dict]] = None) -> dict[str, Any]:
+     """Return a Cursor-style context usage breakdown for one live agent."""
+     from agent.model_metadata import estimate_messages_tokens_rough
+-    from agent.usage_anchor import anchored_context_tokens
+     from agent.system_prompt import build_system_prompt_parts
+ 
+     messages = messages or []
+@@ -169,29 +203,11 @@ def compute_session_context_breakdown(agent: Any, messages: Optional[list[dict]]
+ 
+     comp = getattr(agent, "context_compressor", None)
+     context_max = int(getattr(comp, "context_length", 0) or 0) if comp else 0
+-    # Usage-anchored figure (provider-exact tokens of a response + delta of what was
+-    # appended since) beats last_prompt_tokens (lags) and the heuristic. Prefer the
+-    # turn-base anchor: on reasoning models later same-turn responses inflate
+-    # prompt_tokens with replayed thinking that evaporates at the turn boundary, so
+-    # anchoring on the LAST response makes the meter sawtooth. Fall back to the
+-    # last-response anchor, then measured, then estimated.
+-    anchor = getattr(agent, "_turn_base_usage_anchor", None)
+-    context_used = anchored_context_tokens(messages, anchor, charge_stale_thinking=False)
+-    if context_used is None:
+-        anchor = getattr(agent, "_usage_anchor", None)
+-        context_used = anchored_context_tokens(messages, anchor)
+-    if context_used is None:
+-        measured_used = int(getattr(comp, "last_prompt_tokens", 0) or 0) if comp else 0
+-        context_used = measured_used if measured_used > 0 else estimated_total
+-        source = context_display_source(comp) if measured_used > 0 else "local_estimate"
+-    else:
+-        delta = messages[int(anchor["base_count"]):]
+-        if delta and delta[0].get("role") == "assistant":
+-            delta = delta[1:]
+-        source = "provider_usage_plus_estimate" if delta else "provider_usage"
+-    # A single prompt can never exceed the model window; any excess is estimate drift.
+-    if context_max:
+-        context_used = min(context_used, context_max)
++    # Provider-exact turn base + stale-thinking-free transcript delta wins;
++    # then last-response anchor, compressor gauge, and full local estimate.
++    context_used, source = resolve_context_usage(
++        agent, messages, estimated_fallback=estimated_total
++    )
+ 
+     return {
+         "categories": [
+diff --git a/apps/desktop/src/app/shell/hooks/use-statusbar-items.gauge.test.tsx b/apps/desktop/src/app/shell/hooks/use-statusbar-items.gauge.test.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..d40afea0746ff2de30650239fe130ae1fb57c3a2
+--- /dev/null
++++ b/apps/desktop/src/app/shell/hooks/use-statusbar-items.gauge.test.tsx
+@@ -0,0 +1,68 @@
++import { describe, expect, it } from 'vitest'
++
++import type { ContextBreakdown, UsageStats } from '@/types/hermes'
++
++import { resolveContextGaugeUsage } from './use-statusbar-items'
++
++// Regression for #70871's frozen-gauge half: while a turn is streaming the
++// pre-turn context breakdown must NOT overlay the live streamed usage —
++// otherwise the bar stays frozen at the turn-start value and jumps at turn end.
++const CURRENT: UsageStats = {
++  calls: 1,
++  context_estimated: true,
++  context_source: 'provider_usage_plus_estimate',
++  context_max: 1_000_000,
++  context_percent: 27,
++  context_used: 267_700,
++  input: 10_000,
++  output: 5_000,
++  total: 15_000
++}
++
++const BREAKDOWN: ContextBreakdown = {
++  categories: [],
++  context_estimated: false,
++  context_source: 'provider_usage',
++  context_max: 1_000_000,
++  context_percent: 30,
++  context_used: 320_000,
++  estimated_total: 350_000,
++  model: 'test-model'
++}
++
++describe('resolveContextGaugeUsage', () => {
++  it('keeps the live streamed usage mid-turn even when a breakdown is held', () => {
++    const out = resolveContextGaugeUsage({ busy: true, breakdown: BREAKDOWN, current: CURRENT })
++
++    expect(out.context_used).toBe(267_700)
++    expect(out.context_percent).toBe(27)
++    expect(out.input).toBe(10_000)
++    expect(out.context_estimated).toBe(true)
++    expect(out.context_source).toBe('provider_usage_plus_estimate')
++  })
++
++  it('falls back to the streamed usage mid-turn when no breakdown is held', () => {
++    const out = resolveContextGaugeUsage({ busy: true, breakdown: null, current: CURRENT })
++
++    expect(out).toBe(CURRENT)
++  })
++
++  it('lets the breakdown win when the turn is idle', () => {
++    const out = resolveContextGaugeUsage({ busy: false, breakdown: BREAKDOWN, current: CURRENT })
++
++    expect(out.context_used).toBe(320_000)
++    expect(out.context_percent).toBe(30)
++    expect(out.context_max).toBe(1_000_000)
++    // Non-context fields still come from the streamed usage object.
++    expect(out.input).toBe(10_000)
++    expect(out.calls).toBe(1)
++    expect(out.context_estimated).toBe(false)
++    expect(out.context_source).toBe('provider_usage')
++  })
++
++  it('keeps the streamed usage when idle without a breakdown', () => {
++    const out = resolveContextGaugeUsage({ busy: false, breakdown: undefined, current: CURRENT })
++
++    expect(out).toBe(CURRENT)
++  })
++})
+diff --git a/apps/desktop/src/app/shell/hooks/use-statusbar-items.lifecycle.test.tsx b/apps/desktop/src/app/shell/hooks/use-statusbar-items.lifecycle.test.tsx
+index 00bc9530a7a29bbd978920a6c329f6f080163a1d..d44a521c40eb43bda212d754f4b55f2971998fde 100644
+--- a/apps/desktop/src/app/shell/hooks/use-statusbar-items.lifecycle.test.tsx
++++ b/apps/desktop/src/app/shell/hooks/use-statusbar-items.lifecycle.test.tsx
+@@ -47,7 +47,6 @@ function mountStatusbar() {
+ 
+   const options = {
+     agentsOpen: false,
+-    changeSessionCwd: async () => {},
+     chatOpen: true,
+     commandCenterOpen: false,
+     extraLeftItems: [],
+@@ -134,4 +133,46 @@ describe('statusbar context usage lifecycle', () => {
+     await act(async () => pending[1].reject(new Error('disconnected')))
+     expect(meter().label).toBe('40k/100k')
+   })
++
++  it('ignores an idle RPC that resolves after a turn has started', async () => {
++    const { meter, pending } = mountStatusbar()
++    act(() => {
++      $busy.set(true)
++      $currentUsage.set(usage(40_000))
++    })
++    await act(async () => pending[0].resolve(breakdown(20_000)))
++    expect(meter().label).toBe('40k/100k')
++    act(() => $busy.set(false))
++    expect(meter().label).toBe('40k/100k')
++  })
++
++  it('does not accept the previous session RPC after switching sessions', async () => {
++    const { meter, pending } = mountStatusbar()
++    act(() => {
++      $activeSessionId.set('runtime-b')
++      $selectedStoredSessionId.set('stored-b')
++      $currentUsage.set(usage(5_000))
++    })
++    expect(meter().label).toBe('5k/100k')
++    await act(async () => pending[1].resolve(breakdown(8_000)))
++    await act(async () => pending[0].resolve(breakdown(20_000)))
++    expect(meter().label).toBe('8k/100k')
++  })
++
++  it('waits to fetch until the gauge is enabled and skips fetching while busy', async () => {
++    $statusbarHiddenIds.set(['context-usage'])
++    const { meter, pending } = mountStatusbar()
++    expect(pending).toHaveLength(0)
++    act(() => {
++      $busy.set(true)
++      $statusbarHiddenIds.set([])
++      $currentUsage.set(usage(30_000))
++    })
++    expect(meter().label).toBe('30k/100k')
++    expect(pending).toHaveLength(0)
++    act(() => $busy.set(false))
++    expect(pending).toHaveLength(1)
++    await act(async () => pending[0].resolve(breakdown(35_000)))
++    expect(meter().label).toBe('35k/100k')
++  })
+ })
+diff --git a/apps/desktop/src/app/shell/hooks/use-statusbar-items.tsx b/apps/desktop/src/app/shell/hooks/use-statusbar-items.tsx
+index ca3ce5deb2b2085ab2f54c5be1180fd1a537a59f..a92ccbe8a268417c0fa325d6d2e66ea5b4a5d57f 100644
+--- a/apps/desktop/src/app/shell/hooks/use-statusbar-items.tsx
++++ b/apps/desktop/src/app/shell/hooks/use-statusbar-items.tsx
+@@ -75,13 +75,43 @@ import {
+   $updateStatus,
+   openUpdateOverlayFor
+ } from '@/store/updates'
+-import type { StatusResponse, UsageStats } from '@/types/hermes'
++import type { ContextBreakdown, StatusResponse, UsageStats } from '@/types/hermes'
+ 
+ import { CRON_ROUTE, SETTINGS_ROUTE, WEBHOOKS_ROUTE } from '../../routes'
+ import type { StatusbarItem } from '../statusbar-controls'
+ 
+ const EMPTY_USAGE: UsageStats = { calls: 0, input: 0, output: 0, total: 0 }
+ 
++/**
++ * Pick which usage figure the context gauge should paint.
++ *
++ * While a turn is in flight the backend streams live ``session.usage``
++ * snapshots (tui_gateway/server.py `_start_usage_ticker`, 1s interval) and
++ * the pre-turn breakdown would freeze the bar at the turn-start value — the
++ * "context meter frozen during streaming, jumps at turn end" bug (#70871,
++ * named in the #87903 discussion). Streamed usage wins mid-turn. Only when
++ * the turn is idle does the breakdown win: a resumed session's streamed
++ * store has no context fields, and the idle breakdown answers for it.
++ */
++export function resolveContextGaugeUsage(opts: {
++  busy: boolean
++  breakdown: ContextBreakdown | null | undefined
++  current: UsageStats
++}): UsageStats {
++  const { busy, breakdown, current } = opts
++
++  return !busy && breakdown
++    ? {
++        ...current,
++        context_estimated: breakdown.context_estimated,
++        context_source: breakdown.context_source,
++        context_max: breakdown.context_max,
++        context_percent: breakdown.context_percent,
++        context_used: breakdown.context_used
++      }
++    : current
++}
++
+ interface StatusbarItemsOptions {
+   agentsOpen: boolean
+   changeSessionCwd: (cwd: string, sessionId?: string) => Promise<void>
+@@ -315,26 +345,14 @@ export function useStatusbarItems({
+     sessionId: activeSessionId
+   })
+ 
+-  // The breakdown wins whenever we have one, for two reasons: it reports the
+-  // MEASURED occupancy once the backend has it (falling back to the estimate
+-  // only before that), and it is keyed to the session it describes. The global
+-  // `$currentUsage` is neither — a resumed session reports no context fields,
+-  // and the store merges rather than replaces, so the PREVIOUS session's gauge
+-  // numbers survive the switch. Mid-turn useContextBreakdown returns null (the
+-  // snapshot is pre-turn), so the streamed usage carries the gauge.
++  // NOTE: the original "breakdown wins whenever we have one" is now gated on
++  // `busy` — the breakdown could report MEASURED occupancy (or an estimate)
++  // keyed to the session it describes, but it is a PRE-TURN value once a turn
++  // is streaming, and overlaying it would freeze the live streamed gauge.
++  // Mid-turn the streamed usage carries the gauge (see resolveContextGaugeUsage).
+   const gaugeUsage = useMemo<UsageStats>(
+-    () =>
+-      contextBreakdown
+-        ? {
+-            ...currentUsage,
+-            context_estimated: contextBreakdown.context_estimated,
+-            context_source: contextBreakdown.context_source,
+-            context_max: contextBreakdown.context_max,
+-            context_percent: contextBreakdown.context_percent,
+-            context_used: contextBreakdown.context_used
+-          }
+-        : currentUsage,
+-    [contextBreakdown, currentUsage]
++    () => resolveContextGaugeUsage({ busy, breakdown: contextBreakdown, current: currentUsage }),
++    [busy, contextBreakdown, currentUsage]
+   )
+ 
+   const contextUsage = useMemo(() => usageContextLabel(gaugeUsage), [gaugeUsage])
+diff --git a/tests/agent/test_context_display_provenance.py b/tests/agent/test_context_display_provenance.py
+index 13e24c352759b06fdd43752cfd6020a16b24a63a..c54656548f91164cfb44c4c1861a280bfba69acb 100644
+--- a/tests/agent/test_context_display_provenance.py
++++ b/tests/agent/test_context_display_provenance.py
+@@ -41,3 +41,51 @@ def test_preflight_seed_does_not_label_actual_usage_estimated():
+     from agent.context_breakdown import context_display_source
+     # A cleared live gauge must not re-label a persisted provider fallback.
+     assert context_display_source(comp) == "provider_usage"
++
++
++def test_live_usage_stale_anchors_fall_back_to_compressor_not_lifetime_input():
++    from tui_gateway.server import _get_usage
++
++    comp = ContextCompressor(model="fixture", config_context_length=100_000, quiet_mode=True)
++    comp.update_from_response({"prompt_tokens": 3_210, "completion_tokens": 20})
++    agent = SimpleNamespace(
++        context_compressor=comp,
++        model="fixture",
++        session_input_tokens=900_000,
++        _session_messages=[{"role": "user", "content": "rebuilt transcript"}],
++        _turn_base_usage_anchor={"base_count": 99},
++        _usage_anchor={"base_count": 98},
++    )
++
++    usage = _get_usage(agent)
++    assert usage["context_used"] == 3_210
++    assert usage["context_source"] == "provider_usage"
++    assert usage["context_estimated"] is False
++
++    comp.last_prompt_tokens = 0
++    assert "context_used" not in _get_usage(agent)
++
++
++def test_live_usage_falls_back_to_valid_last_response_anchor():
++    from tui_gateway.server import _get_usage
++
++    messages = [{"role": "user", "content": "question"}]
++    anchor = capture_usage_anchor(2_000, 30, messages)
++    messages.append({"role": "assistant", "content": "answer"})
++    agent = SimpleNamespace(
++        context_compressor=SimpleNamespace(
++            context_length=100_000,
++            last_prompt_tokens=9_000,
++            last_real_prompt_tokens=9_000,
++            compression_count=0,
++        ),
++        model="fixture",
++        _session_messages=messages,
++        _turn_base_usage_anchor={"base_count": 99},
++        _usage_anchor=anchor,
++    )
++
++    usage = _get_usage(agent)
++    assert usage["context_used"] == 2_030
++    assert usage["context_source"] == "provider_usage"
++    assert usage["context_estimated"] is False
+diff --git a/tests/tui_gateway/test_tui_gateway_server.py b/tests/tui_gateway/test_tui_gateway_server.py
+index ae3b3d013295bbd0c7b3bec5ebfc2e93c4d376b8..925a8faf5e71e83d573602ac7f0413a11d4ac54e 100644
+--- a/tests/tui_gateway/test_tui_gateway_server.py
++++ b/tests/tui_gateway/test_tui_gateway_server.py
+@@ -1279,6 +1279,69 @@ def test_usage_ticker_emits_wrapped_usage_payload(monkeypatch):
+     assert payload == {"usage": {"input": 1200, "total": 2400}}
+ 
+ 
++def test_usage_ticker_emits_tool_result_growth_from_real_get_usage(monkeypatch):
++    """A tool append moves occupancy even before provider counters advance."""
++    from agent.usage_anchor import capture_usage_anchor
++
++    events: list[dict] = []
++    monkeypatch.setattr(
++        server, "_emit", lambda event_type, sid, payload: events.append(payload)
++    )
++    messages = [{"role": "user", "content": "start"}]
++    turn_base = capture_usage_anchor(1_000, 20, messages)
++    assert turn_base is not None
++    messages.append({"role": "assistant", "content": "first tool call"})
++    messages.append({"role": "tool", "tool_call_id": "call-0", "content": "first result"})
++    messages.append({
++        "role": "assistant",
++        "content": "second tool call",
++        "reasoning_content": "stale deliberation " * 10_000,
++    })
++    messages.append({"role": "tool", "tool_call_id": "call-1", "content": "second result"})
++    messages.append({"role": "assistant", "content": "calling final tool"})
++    agent = types.SimpleNamespace(
++        model="fixture",
++        session_input_tokens=50_000,
++        session_output_tokens=200,
++        session_prompt_tokens=50_000,
++        session_completion_tokens=200,
++        session_total_tokens=50_200,
++        session_api_calls=1,
++        _session_messages=messages,
++        _turn_base_usage_anchor=turn_base,
++        _usage_anchor=capture_usage_anchor(40_000, 100, messages),
++        context_compressor=types.SimpleNamespace(
++            context_length=100_000,
++            last_prompt_tokens=40_000,
++            last_real_prompt_tokens=40_000,
++            compression_count=0,
++        ),
++    )
++    baseline = server._get_usage(agent)
++    assert baseline["context_used"] < 2_000  # old assistant thinking is excluded
++    assert baseline["context_source"] == "provider_usage_plus_estimate"
++    assert baseline["context_estimated"] is True
++
++    stop, thread = server._start_usage_ticker("sess-1", agent, interval=0.01)
++    messages.append({"role": "tool", "tool_call_id": "call-2", "content": "tool result " * 80})
++    try:
++        deadline = time.time() + 1.0
++        while not events and time.time() < deadline:
++            time.sleep(0.01)
++    finally:
++        stop.set()
++        thread.join(timeout=2.0)
++
++    assert events, "real _get_usage ticker missed transcript-only growth"
++    usage = events[0]["usage"]
++    assert usage["input"] == baseline["input"] == 50_000
++    assert usage["total"] == baseline["total"] == 50_200
++    assert usage["context_used"] > baseline["context_used"]
++    assert usage["context_used"] < 2_000  # stale assistant thinking is not re-charged
++    assert usage["context_source"] == "provider_usage_plus_estimate"
++    assert usage["context_estimated"] is True
++
++
+ def test_usage_ticker_skips_unchanged_snapshots(monkeypatch):
+     # A single long API call leaves the token counters frozen for many
+     # intervals; the ticker must emit nothing at all (the client already has
+diff --git a/tui_gateway/server.py b/tui_gateway/server.py
+index e4a18e4ff40e6f42aaef9929c49918f240d6bd8c..16163d92ca380193688a288d90a8b4feeaa15b75 100644
+--- a/tui_gateway/server.py
++++ b/tui_gateway/server.py
+@@ -1399,7 +1399,10 @@ def _get_usage(agent) -> dict:
+     comp = getattr(agent, "context_compressor", None)
+     if comp:
+         from agent.context_breakdown import context_usage_fields
+-        usage.update(context_usage_fields(comp))
++        messages = getattr(agent, "_session_messages", None)
++        usage.update(context_usage_fields(
++            comp, agent=agent, messages=messages if isinstance(messages, list) else None
++        ))
+         usage["compressions"] = getattr(comp, "compression_count", 0) or 0
+     # Cache-hit ratio + rolling latency/tps (CLI status-bar parity). Omitted, not fabricated, when there is no
+     # data (Codex reports no latency; zero cache reads shows no hit% rather than an alarming 0).

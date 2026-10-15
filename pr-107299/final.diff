@@ -1,0 +1,3243 @@
+diff --git a/apps/desktop/src/components/assistant-ui/thread/index.tsx b/apps/desktop/src/components/assistant-ui/thread/index.tsx
+index 8859efa68561368f4b1c9712bb8d923d2e8de31a..733d3f3cd9513a8480234c58b8701e7d72812926 100644
+--- a/apps/desktop/src/components/assistant-ui/thread/index.tsx
++++ b/apps/desktop/src/components/assistant-ui/thread/index.tsx
+@@ -10,6 +10,7 @@ import { useTranscriptWindow } from '@/components/assistant-ui/thread/transcript
+ import { type RestoreMessageTarget } from '@/components/assistant-ui/thread/types'
+ import { UserEditComposer } from '@/components/assistant-ui/thread/user-edit-composer'
+ import { UserMessage } from '@/components/assistant-ui/thread/user-message'
++import { ToolInspectionProvider } from '@/components/assistant-ui/tool/tool-inspection'
+ import { Intro, type IntroProps } from '@/components/chat/intro'
+ import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+ import type { HermesGateway } from '@/hermes'
+@@ -180,32 +181,29 @@ export const Thread = memo(function Thread({
+ 
+   return (
+     <ThreadEditContext.Provider value={editContext}>
+-      <div
+-        className="relative grid h-full min-h-0 max-w-full grid-rows-[minmax(0,1fr)] overflow-hidden bg-transparent contain-[layout_paint]"
+-        data-slot="thread"
+-      >
+-        <ThreadMessageList
+-          clampToComposer={clampToComposer}
+-          components={messageComponents}
+-          emptyPlaceholder={emptyPlaceholder}
+-          loadingIndicator={loadingIndicator}
+-          scrollProfile={scrollProfile}
+-          sessionId={sessionId}
+-          sessionKey={sessionKey}
+-          sessionLoading={loading === 'session'}
+-        />
+-        {loading === 'session' && <CenteredThreadSpinner />}
+-        <ThreadTimeline />
+-        <ConfirmDialog
+-          confirmLabel={copy.restoreConfirm}
+-          description={copy.restoreBody}
+-          destructive
+-          onClose={closeRestoreConfirm}
+-          onConfirm={confirmRestore}
+-          open={Boolean(restoreConfirmTarget)}
+-          title={copy.restoreTitle}
+-        />
+-      </div>
++      <ToolInspectionProvider scope={editContext}>
++        <div className="relative grid h-full min-h-0 max-w-full grid-rows-[minmax(0,1fr)] overflow-hidden bg-transparent contain-[layout_paint]">
++          <ThreadMessageList
++            clampToComposer={clampToComposer}
++            components={messageComponents}
++            emptyPlaceholder={emptyPlaceholder}
++            loadingIndicator={loadingIndicator}
++            sessionId={sessionId}
++            sessionKey={sessionKey}
++          />
++          {loading === 'session' && <CenteredThreadSpinner />}
++          <ThreadTimeline />
++          <ConfirmDialog
++            confirmLabel={copy.restoreConfirm}
++            description={copy.restoreBody}
++            destructive
++            onClose={closeRestoreConfirm}
++            onConfirm={confirmRestore}
++            open={Boolean(restoreConfirmTarget)}
++            title={copy.restoreTitle}
++          />
++        </div>
++      </ToolInspectionProvider>
+     </ThreadEditContext.Provider>
+   )
+ })
+diff --git a/apps/desktop/src/components/assistant-ui/tool/fallback-model.test.ts b/apps/desktop/src/components/assistant-ui/tool/fallback-model.test.ts
+index bda833c25ff11e1b6513a438aed2858b8c7bb665..e38a1cfbde59dff1d1d602ec335ae03a8f7afd89 100644
+--- a/apps/desktop/src/components/assistant-ui/tool/fallback-model.test.ts
++++ b/apps/desktop/src/components/assistant-ui/tool/fallback-model.test.ts
+@@ -520,7 +520,8 @@ describe('clampForDisplay', () => {
+ 
+     expect(clamped.length).toBeLessThan(oversized.length)
+     expect(clamped.startsWith('x'.repeat(MAX_TOOL_RENDER_CHARS))).toBe(true)
+-    expect(clamped).toContain(`${new Intl.NumberFormat().format(5_000)} more characters truncated`)
++    expect(clamped).toContain('5,000 more characters hidden in this preview')
++    expect(clamped).toContain('open tool details')
+   })
+ })
+ 
+@@ -534,7 +535,7 @@ describe('prettyJson caps serialized result size', () => {
+     const out = prettyJson({ content: huge })
+ 
+     expect(out.length).toBeLessThanOrEqual(MAX_TOOL_RENDER_CHARS + 200)
+-    expect(out).toContain('truncated')
++    expect(out).toContain('hidden in this preview')
+   })
+ })
+ 
+diff --git a/apps/desktop/src/components/assistant-ui/tool/fallback-model/format.ts b/apps/desktop/src/components/assistant-ui/tool/fallback-model/format.ts
+index c75b6800126e4058159f667eb6353c54d2739b25..76b85367e0f09fd56c5885b079ad6f7a3651ed59 100644
+--- a/apps/desktop/src/components/assistant-ui/tool/fallback-model/format.ts
++++ b/apps/desktop/src/components/assistant-ui/tool/fallback-model/format.ts
+@@ -1,4 +1,4 @@
+-import { extractToolErrorMessage } from '@/lib/tool-result-summary'
++import { translateNow } from '@/i18n'
+ 
+ export function isRecord(value: unknown): value is Record<string, unknown> {
+   return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+@@ -68,7 +68,7 @@ export function contextValue(value: unknown): string {
+ // Each tool result is server-capped (~100KB), but a turn over a big directory
+ // stacks many rows; painting/serializing them all floods the renderer (freeze,
+ // then OOM). Clamp every inline-painted payload to a bounded slice — the row's
+-// Copy button still reads the uncapped `view.detail` for the full output.
++// inspector provides the complete available payload separately.
+ export const MAX_TOOL_RENDER_CHARS = 20_000
+ 
+ export function clampForDisplay(value: string, max = MAX_TOOL_RENDER_CHARS): string {
+@@ -78,7 +78,7 @@ export function clampForDisplay(value: string, max = MAX_TOOL_RENDER_CHARS): str
+ 
+   const omitted = value.length - max
+ 
+-  return `${value.slice(0, max)}\n\n… ${omitted.toLocaleString()} more characters truncated — use Copy for the full output.`
++  return `${value.slice(0, max)}\n\n… ${translateNow('assistant.tool.inspector.previewLimit', omitted)}`
+ }
+ 
+ export function prettyJson(value: unknown): string {
+diff --git a/apps/desktop/src/components/assistant-ui/tool/fallback-model/index.ts b/apps/desktop/src/components/assistant-ui/tool/fallback-model/index.ts
+index 91f86eefb7b2a67ad3ea50a6238b5f8e086719b1..57619625e731b6e18488d7cd2fd2f89285496c22 100644
+--- a/apps/desktop/src/components/assistant-ui/tool/fallback-model/index.ts
++++ b/apps/desktop/src/components/assistant-ui/tool/fallback-model/index.ts
+@@ -1235,6 +1235,26 @@ export function toolCopyPayload(part: ToolPart, view: ToolView): { label: string
+   const args = parseMaybeObject(part.args)
+   const result = parseMaybeObject(part.result)
+   const detail = view.detail.trim()
++
++  // Copy an explicitly supplied stream/file body verbatim, even when short or
++  // empty. Length is never evidence that a command/path is the right payload.
++  const outputKeys =
++    part.toolName === 'terminal' || part.toolName === 'execute_code'
++      ? ['output', 'stdout', 'stderr']
++      : part.toolName === 'read_file'
++        ? ['content', 'text', 'data', 'body']
++        : []
++
++  for (const key of outputKeys) {
++    if (typeof result[key] === 'string') {
++      return { label: part.toolName === 'read_file' ? copy.file : copy.output, text: result[key] }
++    }
++  }
++
++  if (outputKeys.length && typeof part.result === 'string' && !Object.keys(result).length) {
++    return { label: part.toolName === 'read_file' ? copy.file : copy.output, text: part.result }
++  }
++
+   const hasSubstantialOutput = detail.length > 16
+ 
+   if (part.toolName === 'terminal' || part.toolName === 'execute_code') {
+diff --git a/apps/desktop/src/components/assistant-ui/tool/fallback.tsx b/apps/desktop/src/components/assistant-ui/tool/fallback.tsx
+index 312506f7d980c4ae2bb74f085f2fbbc542aa7571..2e2118c089aeb33a65f2bbb59cbaf6c4410eba75 100644
+--- a/apps/desktop/src/components/assistant-ui/tool/fallback.tsx
++++ b/apps/desktop/src/components/assistant-ui/tool/fallback.tsx
+@@ -82,6 +82,7 @@ import {
+ } from './fallback-model'
+ import { isToolCallPart, summarizeToolRun } from './run-summary'
+ import { ToolRunTicker } from './run-ticker'
++import { ToolInspectionButton } from './tool-inspection'
+ 
+ // `true` when a ToolEntry is rendered inside an embedding wrapper that owns
+ // the per-row chrome (timer / preview). The flat ToolGroupSlot sets this
+@@ -549,39 +550,39 @@ function ToolEntry({ part }: ToolEntryProps) {
+   // a completed/failed row that would otherwise sit at the tail of the chat.
+   // It goes in the in-flow `action` slot (not `trailing`) so it can't overlap
+   // the disclosure caret's hit-target — see the comment above `trailing`.
+-  const dismissAction = canDismiss ? (
+-    <Button
+-      aria-label={statusCopy.dismiss}
+-      className={cn(
+-        'size-5 rounded-md text-(--ui-text-tertiary) transition-opacity hover:text-(--ui-text-primary) hover:opacity-100',
+-        open
+-          ? 'opacity-80'
+-          : 'opacity-0 group-hover/disclosure-row:opacity-80 group-focus-within/disclosure-row:opacity-80'
+-      )}
+-      onClick={event => {
+-        event.stopPropagation()
+-        dismissToolRow(disclosureId)
+-      }}
+-      size="icon-xs"
+-      type="button"
+-      variant="ghost"
+-    >
+-      <Codicon name="close" size="0.75rem" />
+-    </Button>
+-  ) : undefined
++  const dismissAction = (
++    <>
++      <ToolInspectionButton inlineDiff={inlineDiff} part={stablePart} />
++      {canDismiss ? (
++        <Tip label={statusCopy.dismiss}>
++          <Button
++            aria-label={statusCopy.dismiss}
++            className={cn(
++              'size-5 rounded-md text-(--ui-text-tertiary) transition-opacity hover:text-(--ui-text-primary) hover:opacity-100',
++              open
++                ? 'opacity-80'
++                : 'opacity-0 group-hover/disclosure-row:opacity-80 group-focus-within/disclosure-row:opacity-80'
++            )}
++            onClick={event => {
++              event.stopPropagation()
++              dismissToolRow(disclosureId)
++            }}
++            size="icon-xs"
++            type="button"
++            variant="ghost"
++          >
++            <Codicon name="close" size="0.75rem" />
++          </Button>
++        </Tip>
++      ) : null}
++    </>
++  )
+ 
+   if (dismissed) {
+     return null
+   }
+ 
+-  // A completed file edit with no diff to review is a bare, unexpandable row.
+-  // This is almost always a `write_file` create after a reload: only `patch`
+-  // persists its diff in the tool result, so creates rehydrate diff-less and
+-  // read like dead duplicates of the real diff row. Hide them — but keep
+-  // in-flight writes (activity) and failures (errors) visible.
+-  if (isFileEdit && !isPending && view.status !== 'error' && !view.inlineDiff) {
+-    return null
+-  }
++  // Even without a saved diff, the operation has inspectable args/result.
+ 
+   return (
+     <div
+diff --git a/apps/desktop/src/components/assistant-ui/tool/tool-inspection-dialog.tsx b/apps/desktop/src/components/assistant-ui/tool/tool-inspection-dialog.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..5545012a65b2b0ae00a67b33d558597797a5ead1
+--- /dev/null
++++ b/apps/desktop/src/components/assistant-ui/tool/tool-inspection-dialog.tsx
+@@ -0,0 +1,225 @@
++import { useMemo, useState } from 'react'
++
++import { Button } from '@/components/ui/button'
++import { CopyButton } from '@/components/ui/copy-button'
++import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
++import { LogView } from '@/components/ui/log-view'
++import { SearchField } from '@/components/ui/search-field'
++import { SegmentedControl } from '@/components/ui/segmented-control'
++import { useI18n } from '@/i18n'
++import { cn } from '@/lib/utils'
++
++import type { ToolPart } from './fallback-model/types'
++import {
++  INSPECTION_PAGE_CHARS,
++  type InspectionSection,
++  type InspectionSectionId,
++  inspectionSections,
++  inspectionText,
++  inspectionWindow
++} from './tool-inspection-model'
++
++const MAX_SEARCH_MATCHES = 1_000
++
++function searchMatches(text: string | undefined, query: string): { offsets: number[]; truncated: boolean } {
++  if (text === undefined || !query) {
++    return { offsets: [], truncated: false }
++  }
++
++  const offsets: number[] = []
++  let from = 0
++
++  while (offsets.length < MAX_SEARCH_MATCHES) {
++    const index = text.indexOf(query, from)
++
++    if (index < 0) {
++      return { offsets, truncated: false }
++    }
++
++    offsets.push(index)
++    from = index + Math.max(query.length, 1)
++  }
++
++  return { offsets, truncated: text.indexOf(query, from) >= 0 }
++}
++
++function InspectionText({ section }: { section: InspectionSection }) {
++  const { t } = useI18n()
++  const copy = t.assistant.tool.inspector
++  const text = useMemo(() => inspectionText(section.value), [section.value])
++  const [offset, setOffset] = useState(0)
++  const [query, setQuery] = useState('')
++  const [activeMatch, setActiveMatch] = useState(0)
++  const [wrap, setWrap] = useState(true)
++  const matches = useMemo(() => searchMatches(text, query), [query, text])
++  const normalizedMatch = matches.offsets.length ? Math.min(activeMatch, matches.offsets.length - 1) : 0
++  const match = matches.offsets[normalizedMatch] ?? -1
++  const shown = inspectionWindow(text ?? '', offset)
++
++  function moveToMatch(index: number) {
++    const next = matches.offsets[index]
++
++    if (next === undefined) {
++      return
++    }
++
++    setActiveMatch(index)
++    setOffset(Math.max(0, next - 200))
++  }
++
++  function changeQuery(value: string) {
++    setQuery(value)
++    setActiveMatch(0)
++
++    const first = !value || text === undefined ? -1 : text.indexOf(value)
++    setOffset(first >= 0 ? Math.max(0, first - 200) : 0)
++  }
++
++  const unavailable = text === undefined
++  const empty = text === ''
++  const highlightStart = Math.max(0, match - shown.start)
++  const highlightEnd = Math.min(shown.text.length, match + query.length - shown.start)
++  const highlighted = query && match >= shown.start && match < shown.end
++  const matchCount = query
++    ? matches.offsets.length
++      ? `${normalizedMatch + 1}/${matches.offsets.length}${matches.truncated ? '+' : ''}`
++      : '0/0'
++    : ''
++
++  return (
++    <div className="grid min-h-0 min-w-0 gap-2">
++      <div className="flex min-w-0 flex-wrap items-center gap-2">
++        <SearchField aria-label={copy.search} onChange={changeQuery} placeholder={copy.search} value={query} />
++        {query && (
++          <span className="shrink-0 text-xs tabular-nums text-muted-foreground" role="status">
++            {matchCount}
++          </span>
++        )}
++        <Button
++          disabled={!matches.offsets.length}
++          onClick={() => moveToMatch((normalizedMatch - 1 + matches.offsets.length) % matches.offsets.length)}
++          size="sm"
++          variant="ghost"
++        >
++          {copy.previousMatch}
++        </Button>
++        <Button
++          disabled={!matches.offsets.length}
++          onClick={() => moveToMatch((normalizedMatch + 1) % matches.offsets.length)}
++          size="sm"
++          variant="ghost"
++        >
++          {copy.nextMatch}
++        </Button>
++        <Button aria-pressed={wrap} onClick={() => setWrap(value => !value)} size="sm" variant="ghost">
++          {copy.wrap}
++        </Button>
++        <CopyButton disabled={unavailable || empty} label={copy.copySection} text={text ?? ''} />
++      </div>
++      {query && match < 0 && <p role="status">{copy.noMatch}</p>}
++      <LogView
++        aria-label={copy.sections[section.id]}
++        className={cn(
++          'h-[45vh] min-h-0 text-(--ui-text-secondary)',
++          wrap ? 'whitespace-pre-wrap wrap-anywhere' : 'whitespace-pre break-normal'
++        )}
++        role="region"
++        tabIndex={0}
++      >
++        {unavailable ? (
++          section.value === undefined ? (
++            copy.unavailable
++          ) : (
++            copy.serializationFailed
++          )
++        ) : empty ? (
++          copy.empty
++        ) : highlighted ? (
++          <>
++            {shown.text.slice(0, highlightStart)}
++            <mark>{shown.text.slice(highlightStart, highlightEnd)}</mark>
++            {shown.text.slice(highlightEnd)}
++          </>
++        ) : (
++          shown.text
++        )}
++      </LogView>
++      <div className="flex flex-wrap items-center gap-2">
++        <Button
++          disabled={shown.start === 0}
++          onClick={() => setOffset(Math.max(0, shown.start - INSPECTION_PAGE_CHARS))}
++          size="sm"
++          variant="ghost"
++        >
++          {copy.previousPage}
++        </Button>
++        <span className="text-xs text-muted-foreground" role="status">
++          {copy.range(empty || unavailable ? 0 : shown.start + 1, shown.end, text?.length ?? 0)}
++        </span>
++        <Button
++          disabled={shown.end >= (text?.length ?? 0)}
++          onClick={() => setOffset(shown.end)}
++          size="sm"
++          variant="ghost"
++        >
++          {copy.nextPage}
++        </Button>
++      </div>
++    </div>
++  )
++}
++
++export default function ToolInspectionDialog({
++  part,
++  inlineDiff,
++  onClose,
++  trigger
++}: {
++  part: ToolPart
++  inlineDiff: string
++  onClose: () => void
++  trigger: HTMLButtonElement
++}) {
++  const { t } = useI18n()
++  const copy = t.assistant.tool.inspector
++  const sections = useMemo(() => inspectionSections(part, inlineDiff), [part, inlineDiff])
++  const [selected, setSelected] = useState<InspectionSectionId>(part.result === undefined ? 'args' : 'result')
++  const section = sections.find(value => value.id === selected) ?? sections[0]
++
++  return (
++    <Dialog
++      onOpenChange={open => {
++        if (!open) {
++          onClose()
++        }
++      }}
++      open
++    >
++      <DialogContent
++        className="w-[90vw] max-w-4xl"
++        onCloseAutoFocus={event => {
++          event.preventDefault()
++
++          if (trigger.isConnected) {
++            trigger.focus()
++          }
++        }}
++      >
++        <DialogHeader>
++          <DialogTitle>
++            {copy.title} · {part.toolName}
++          </DialogTitle>
++          <DialogDescription>{copy.notice}</DialogDescription>
++        </DialogHeader>
++        <div className="max-w-full overflow-x-auto">
++          <SegmentedControl
++            onChange={setSelected}
++            options={sections.map(value => ({ id: value.id, label: copy.sections[value.id] }))}
++            value={selected}
++          />
++        </div>
++        <InspectionText key={section.id} section={section} />
++      </DialogContent>
++    </Dialog>
++  )
++}
+diff --git a/apps/desktop/src/components/assistant-ui/tool/tool-inspection-model.test.ts b/apps/desktop/src/components/assistant-ui/tool/tool-inspection-model.test.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..10cf3aa7254d294df782cb57b8392a2709da444d
+--- /dev/null
++++ b/apps/desktop/src/components/assistant-ui/tool/tool-inspection-model.test.ts
+@@ -0,0 +1,35 @@
++import { describe, expect, it } from 'vitest'
++
++import { INSPECTION_PAGE_CHARS, inspectionSections, inspectionText, inspectionWindow } from './tool-inspection-model'
++
++describe('available inspection payloads', () => {
++  it('retains empty and scalar values without treating them as missing', () => {
++    for (const [value, text] of [
++      [undefined, undefined],
++      ['', ''],
++      [null, 'null'],
++      [false, 'false'],
++      [0, '0'],
++      [[], '[]']
++    ] as const) {
++      expect(inspectionText(value)).toBe(text)
++    }
++
++    const result = { stdout: '', stderr: 'diagnostic', inline_diff: '+line' }
++    const sections = inspectionSections({ type: 'tool-call', toolName: 'terminal', args: { command: 'echo' }, result })
++    expect(sections.find(section => section.id === 'result')?.value).toBe(result)
++    expect(sections.find(section => section.id === 'stdout')?.value).toBe('')
++    expect(sections.find(section => section.id === 'stderr')?.value).toBe('diagnostic')
++    expect(sections.find(section => section.id === 'diff')?.value).toBe('+line')
++  })
++
++  it('bounds very long single lines without splitting surrogate pairs', () => {
++    const text = 'x'.repeat(INSPECTION_PAGE_CHARS - 1) + '😀' + 'y'.repeat(INSPECTION_PAGE_CHARS * 2)
++    const first = inspectionWindow(text, 0)
++    const second = inspectionWindow(text, first.end)
++    expect(first.text.endsWith('😀')).toBe(true)
++    expect(first.text.length).toBeLessThanOrEqual(INSPECTION_PAGE_CHARS + 2)
++    expect(second.text).toBe('y'.repeat(INSPECTION_PAGE_CHARS))
++    expect(inspectionWindow(text, INSPECTION_PAGE_CHARS).text.startsWith('😀')).toBe(true)
++  })
++})
+diff --git a/apps/desktop/src/components/assistant-ui/tool/tool-inspection-model.ts b/apps/desktop/src/components/assistant-ui/tool/tool-inspection-model.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..98f2d5e1a492a20f188ac1cd023dce292650a64e
+--- /dev/null
++++ b/apps/desktop/src/components/assistant-ui/tool/tool-inspection-model.ts
+@@ -0,0 +1,90 @@
++import { parseMaybeObject } from './fallback-model/format'
++import type { ToolPart } from './fallback-model/types'
++
++export type InspectionSectionId = 'args' | 'result' | 'metadata' | 'command' | 'stdout' | 'stderr' | 'diff'
++
++export interface InspectionSection {
++  id: InspectionSectionId
++  value: unknown
++}
++
++// Bound even a single enormous line. Paging affects only painting, never the
++// selected value, search range or clipboard payload.
++export const INSPECTION_PAGE_CHARS = 16_000
++
++export function inspectionSections(part: ToolPart, inlineDiff = ''): InspectionSection[] {
++  const args = parseMaybeObject(part.args)
++  const result = parseMaybeObject(part.result)
++
++  const sections: InspectionSection[] = [
++    { id: 'args', value: part.args },
++    { id: 'result', value: part.result },
++    {
++      id: 'metadata',
++      value: {
++        toolName: part.toolName,
++        toolCallId: part.toolCallId,
++        timestamp: part.timestamp,
++        completedAt: part.completedAt,
++        isError: part.isError,
++        // Optional, for the lossless live-result projection. Older transcripts
++        // have only the result, which remains inspectable without this field.
++        display: 'toolResultMetadata' in part ? part.toolResultMetadata : undefined
++      }
++    }
++  ]
++
++  const command = typeof args.command === 'string' ? args.command : args.code
++
++  if (typeof command === 'string') {
++    sections.push({ id: 'command', value: command })
++  }
++
++  for (const id of ['stdout', 'stderr'] as const) {
++    if (typeof result[id] === 'string') {
++      sections.push({ id, value: result[id] })
++    }
++  }
++
++  const diff =
++    typeof result.inline_diff === 'string'
++      ? result.inline_diff
++      : typeof result.diff === 'string'
++        ? result.diff
++        : inlineDiff
++
++  if (diff) {
++    sections.push({ id: 'diff', value: diff })
++  }
++
++  return sections
++}
++
++/** Only the selected section is serialized, after the inspector is opened. */
++export function inspectionText(value: unknown): string | undefined {
++  if (typeof value === 'string') {
++    return value
++  }
++
++  try {
++    return JSON.stringify(value, null, 2)
++  } catch {
++    return undefined
++  }
++}
++
++export function inspectionWindow(text: string, offset: number) {
++  let start = Math.max(0, Math.min(offset, Math.max(0, text.length - 1)))
++  let end = Math.min(text.length, start + INSPECTION_PAGE_CHARS)
++
++  // Do not paint half a surrogate pair at either edge of the window.
++  if (start > 0 && /[\uDC00-\uDFFF]/.test(text[start]) && /[\uD800-\uDBFF]/.test(text[start - 1])) {
++    start--
++  }
++
++  if (end < text.length && /[\uD800-\uDBFF]/.test(text[end - 1]) && /[\uDC00-\uDFFF]/.test(text[end])) {
++    end++
++  }
++
++  return { start, end, text: text.slice(start, end) }
++}
+diff --git a/apps/desktop/src/components/assistant-ui/tool/tool-inspection.test.tsx b/apps/desktop/src/components/assistant-ui/tool/tool-inspection.test.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..ff90b23c14fadd94d15756e542d139e23791281c
+--- /dev/null
++++ b/apps/desktop/src/components/assistant-ui/tool/tool-inspection.test.tsx
+@@ -0,0 +1,98 @@
++import type { ThreadMessage } from '@assistant-ui/react'
++import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
++import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
++
++import { $toolDisclosureStates, $toolViewMode } from '@/store/tool-view'
++
++import { assistantMessage, stubThreadEnvironment, stubThreadViewportSize, ThreadRuntime } from '../test-utils'
++import { Thread } from '../thread'
++
++import { buildToolView, toolCopyPayload } from './fallback-model'
++
++stubThreadEnvironment()
++stubThreadViewportSize()
++
++const writeText = vi.fn(async (_text: string) => {})
++const originalClipboard = navigator.clipboard
++
++function message(result: unknown, args: unknown = { command: 'printf ok' }): ThreadMessage {
++  return {
++    ...assistantMessage(),
++    content: [{ type: 'tool-call', toolCallId: 'inspect-1', toolName: 'terminal', args, argsText: '{}', result }]
++  } as ThreadMessage
++}
++
++function Harness({ value, sessionId = 'session-a' }: { value: ThreadMessage; sessionId?: string }) {
++  return (
++    <ThreadRuntime messages={[value]}>
++      <Thread sessionId={sessionId} />
++    </ThreadRuntime>
++  )
++}
++
++beforeEach(() => {
++  writeText.mockClear()
++  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
++  $toolViewMode.set('product')
++  $toolDisclosureStates.set({})
++})
++
++afterEach(() => {
++  cleanup()
++  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard })
++})
++
++describe('tool inspection in the normal transcript', () => {
++  it('searches and copies past the inline limit independently of long arguments, with bounded painting', async () => {
++    const stdout = 'x'.repeat(25_000) + '\nneedle after the inline limit\n' + 'y'.repeat(100) + '\nneedle again\n'
++    render(<Harness value={message({ stdout, stderr: 'diagnostic' }, { command: 'c'.repeat(30_000) })} />)
++    const trigger = await screen.findByRole('button', { name: 'Open tool details' })
++    fireEvent.click(trigger)
++    const dialog = await screen.findByRole('dialog')
++    const ui = within(dialog)
++    fireEvent.click(ui.getByRole('button', { name: 'Arguments' }))
++    expect(ui.getByRole('region', { name: 'Arguments' }).textContent?.length).toBeLessThanOrEqual(16_002)
++    fireEvent.click(ui.getByRole('button', { name: 'stdout' }))
++    fireEvent.change(ui.getByRole('textbox', { name: 'Find in section (case-sensitive)' }), {
++      target: { value: 'needle' }
++    })
++    expect(ui.getByRole('region', { name: 'stdout' }).textContent).toContain('needle after the inline limit')
++    expect(ui.getByText('1/2')).toBeTruthy()
++    fireEvent.click(ui.getByRole('button', { name: 'Next match' }))
++    expect(ui.getByText('2/2')).toBeTruthy()
++    expect(ui.getByRole('region', { name: 'stdout' }).textContent).toContain('needle again')
++    fireEvent.click(ui.getByRole('button', { name: 'Next match' }))
++    expect(ui.getByText('1/2')).toBeTruthy()
++    fireEvent.click(ui.getByRole('button', { name: 'Previous match' }))
++    expect(ui.getByText('2/2')).toBeTruthy()
++    expect(ui.getByRole('region', { name: 'stdout' }).textContent?.length).toBeLessThanOrEqual(16_002)
++    fireEvent.click(ui.getByRole('button', { name: 'Wrap lines' }))
++    expect(ui.getByRole('button', { name: 'Wrap lines' }).getAttribute('aria-pressed')).toBe('false')
++    fireEvent.click(ui.getByRole('button', { name: 'Copy section' }))
++    await waitFor(() => expect(writeText).toHaveBeenCalledWith(stdout))
++    fireEvent.keyDown(dialog, { key: 'Escape' })
++    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
++    expect(window.document.activeElement).toBe(trigger)
++  })
++
++  it('keeps the opened snapshot after the row disappears but closes it on a session switch', async () => {
++    const { rerender } = render(<Harness value={message({ stdout: 'original' })} />)
++    fireEvent.click(await screen.findByRole('button', { name: 'Open tool details' }))
++    await screen.findByRole('dialog')
++    rerender(<Harness value={assistantMessage()} />)
++    expect(within(screen.getByRole('dialog')).getByRole('region', { name: 'Result' }).textContent).toContain('original')
++    rerender(<Harness sessionId="session-b" value={message({ stdout: 'different session' })} />)
++    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
++  })
++
++  it('copies short and whitespace-bearing output as output, never as a command or path', () => {
++    for (const text of ['ok', '', ' \n ']) {
++      for (const part of [
++        { type: 'tool-call' as const, toolName: 'terminal', args: { command: 'echo ok' }, result: { stdout: text } },
++        { type: 'tool-call' as const, toolName: 'read_file', args: { path: '/tmp/result' }, result: { content: text } }
++      ]) {
++        expect(toolCopyPayload(part, buildToolView(part, '')).text).toBe(text)
++      }
++    }
++  })
++})
+diff --git a/apps/desktop/src/components/assistant-ui/tool/tool-inspection.tsx b/apps/desktop/src/components/assistant-ui/tool/tool-inspection.tsx
+new file mode 100644
+index 0000000000000000000000000000000000000000..2bc49ec7c3d255ea081cba2a078e0d8c7699bf15
+--- /dev/null
++++ b/apps/desktop/src/components/assistant-ui/tool/tool-inspection.tsx
+@@ -0,0 +1,79 @@
++import {
++  createContext,
++  lazy,
++  type PropsWithChildren,
++  Suspense,
++  useCallback,
++  useContext,
++  useEffect,
++  useState
++} from 'react'
++
++import { Button } from '@/components/ui/button'
++import { Codicon } from '@/components/ui/codicon'
++import { Tip } from '@/components/ui/tooltip'
++import { useI18n } from '@/i18n'
++
++import type { ToolPart } from './fallback-model/types'
++
++const InspectionDialog = lazy(() => import('./tool-inspection-dialog'))
++
++interface InspectionTarget {
++  part: ToolPart
++  inlineDiff: string
++  trigger: HTMLButtonElement
++}
++
++const InspectionContext = createContext<((target: InspectionTarget) => void) | null>(null)
++
++/** A thread-local host survives ticker/list virtualization. No payload is
++ * duplicated into a global store, persisted, or shared between session tiles. */
++export function ToolInspectionProvider({ children, scope }: PropsWithChildren<{ scope: unknown }>) {
++  const [inspection, setInspection] = useState<(InspectionTarget & { scope: unknown }) | null>(null)
++  const open = useCallback((target: InspectionTarget) => setInspection({ ...target, scope }), [scope])
++  const close = useCallback(() => setInspection(null), [])
++
++  useEffect(() => setInspection(null), [scope])
++
++  return (
++    <InspectionContext.Provider value={open}>
++      {children}
++      {inspection && inspection.scope === scope && (
++        <Suspense fallback={null}>
++          <InspectionDialog
++            inlineDiff={inspection.inlineDiff}
++            onClose={close}
++            part={inspection.part}
++            trigger={inspection.trigger}
++          />
++        </Suspense>
++      )}
++    </InspectionContext.Provider>
++  )
++}
++
++export function ToolInspectionButton({ part, inlineDiff }: { part: ToolPart; inlineDiff: string }) {
++  const open = useContext(InspectionContext)
++  const { t } = useI18n()
++  const label = t.assistant.tool.inspector.open
++
++  if (!open) {
++    return null
++  }
++
++  return (
++    <Tip label={label}>
++      <Button
++        aria-label={label}
++        onClick={event => {
++          event.stopPropagation()
++          open({ part, inlineDiff, trigger: event.currentTarget })
++        }}
++        size="icon-xs"
++        variant="ghost"
++      >
++        <Codicon name="inspect" size="0.75rem" />
++      </Button>
++    </Tip>
++  )
++}
+diff --git a/apps/desktop/src/i18n/ar.ts b/apps/desktop/src/i18n/ar.ts
+index 1948a6b5adf2377c60ad733d023fdafd3851d2ba..8607b71f98686caae3892248439205d420710990 100644
+--- a/apps/desktop/src/i18n/ar.ts
++++ b/apps/desktop/src/i18n/ar.ts
+@@ -60,30 +60,1105 @@ export const arOverrides = {
+     queueLostDiscard: 'تجاهل',
+     queueLostDiscardTip: 'أعادت البوابة التشغيل أثناء هذا الدور ولا يمكن إكماله. تجاهله لتستمر الأدوار المنتظرة خلفه.'
+   },
+-  statusStack: arChat.statusStack,
+-  updates: arBoot.updates,
+-  install: arBoot.install,
+-  onboarding: arBoot.onboarding,
+-  modelPicker: arSettings.modelPicker,
+-  modelVisibility: arSettings.modelVisibility,
+-  shell: arChrome.shell,
+-  rightSidebar: arChrome.rightSidebar,
+-  preview: arArtifacts.preview,
+-  interfaceMode: arSettings.interfaceMode,
+-  zones: arChrome.zones,
+-  contextMenu: arChrome.contextMenu,
+-  assistant: arAssistant.assistant,
+-  prompts: arChat.prompts,
+-  desktop: arChat.desktop,
+-  errors: arDiagnostics.errors,
+-  tips: arChat.tips,
+-  ui: arCommon.ui,
+-  freeTier: {
+-    offer: {
+-      heading: 'واصل مع Hermes',
+-      body: 'أنت تستخدم الحصة المجانية. إذا واصلت استخدام Hermes فستبدأ بمواجهة حدود الاستخدام. سجّل الدخول بحساب Nous مجاني للحصول على حصة أكبر.',
+-      signIn: 'تسجيل الدخول',
+-      notNow: 'ليس الآن'
++  statusStack: {
++    agents: 'الوكلاء',
++    background: count => `${count} في الخلفية`,
++    goalActive: 'الهدف نشط',
++    goalBlocked: 'الهدف متعذر',
++    goalDone: 'اكتمل الهدف',
++    goalPaused: 'الهدف متوقف مؤقتًا',
++    goalWaiting: 'الهدف قيد الانتظار',
++    subagents: count => `${count} ${count === 1 ? 'وكيل فرعي' : 'وكيل فرعي'}`,
++    todos: (done, total) => `المهام ${done}/${total}`,
++    running: 'قيد التشغيل',
++    stop: 'إيقاف',
++    dismiss: 'تجاهل',
++    exit: code => `خروج ${code}`,
++    control: {
++      goalActiveTurns: (turn, maxTurns) => `الجولة ${turn}/${maxTurns}`,
++      goalDoneTurns: turns => `${turns} جولات`,
++      goalTurn: turn => `الجولة ${turn}`,
++      goalActions: 'إجراءات الهدف',
++      viewDetails: 'عرض التفاصيل',
++      addCriterion: 'إضافة معيار',
++      addCriterionDialogTitle: 'إضافة معيار',
++      addCriterionPlaceholder: 'أدخل نص المعيار...',
++      criterionLabel: 'المعيار',
++      pauseGoal: 'إيقاف الهدف مؤقتاً',
++      resumeGoal: 'استئناف الهدف',
++      resumeNow: 'استئناف الآن',
++      clearGoal: 'مسح الهدف',
++      clearGoalConfirmTitle: 'مسح الهدف؟',
++      clearGoalConfirmBody: 'هل أنت متأكد من مسح الهدف النشط؟ لا يمكن التراجع عن هذا الإجراء.',
++      copyCriterion: index => `نسخ المعيار ${index}`,
++      removeCriterion: index => `إزالة المعيار ${index}`,
++      removeCriterionConfirmTitle: index => `إزالة المعيار ${index}؟`,
++      removeCriterionConfirmBody: index => `هل أنت متأكد من إزالة المعيار ${index}؟`,
++      clearCriteria: 'مسح جميع المعايير',
++      clearCriteriaConfirmTitle: 'مسح جميع المعايير؟',
++      clearCriteriaConfirmBody: 'هل أنت متأكد من رغبتك في إزالة جميع المعايير من هذا الهدف؟',
++      criteriaHeader: count => `المعايير · ${count}`,
++      noCriteria: 'لا توجد معايير',
++      goalDetailsTitle: 'تفاصيل الهدف',
++      objectiveLabel: 'الهدف',
++      contractOutcome: 'النتيجة',
++      contractVerification: 'التحقق',
++      contractConstraints: 'القيود',
++      contractBoundaries: 'الحدود',
++      contractStopWhen: 'التوقف عند',
++      waitBarrierTitle: 'شرط الانتظار',
++      waitUntil: target => `في الانتظار حتى ${target}`,
++      waitSession: target => `في انتظار الجلسة ${target}`,
++      waitPid: pid => `في انتظار العملية ${pid}`,
++      qualityGatesTitle: 'بوابات الجودة',
++      gateCommand: 'الأمر',
++      gateAttempts: (attempts, max) => `${attempts}/${max} محاولات`,
++      gateTimeout: seconds => `مهلة ${seconds} ثانية`,
++      gateLastExit: code => (code === null ? 'قيد الانتظار' : `رمز الخروج: ${code}`),
++      loopActive: 'التكرار نشط',
++      loopPaused: 'التكرار متوقف مؤقتاً',
++      loopDeferred: 'التكرار مؤجل',
++      loopFinished: 'التكرار منتهي',
++      loopRuns: runs => `${runs} مرات تشغيل`,
++      loopRunCount: (current, total) => `تشغيل ${current}/${total}`,
++      loopNext: time => `التالي ${time}`,
++      loopEverySeconds: seconds => `كل ${seconds} ث`,
++      loopEveryMinutes: minutes => `كل ${minutes} د`,
++      loopEveryHours: hours => `كل ${hours} س`,
++      loopSelfPaced: 'ذاتي الإيقاع',
++      loopActions: 'إجراءات التكرار',
++      pauseLoop: 'إيقاف التكرار مؤقتاً',
++      resumeLoop: 'استئناف التكرار',
++      stopLoop: 'إيقاف التكرار',
++      stopLoopConfirmTitle: 'إيقاف التكرار؟',
++      stopLoopConfirmBody: 'هل أنت متأكد من رغبتك في إيقاف هذا التكرار؟',
++      dismissLoop: 'تجاهل التكرار',
++      loopPromptLabel: 'الموجه',
++      loopCadenceLabel: 'الإيقاع',
++      loopUntilLabel: 'شرط الانتهاء',
++      loopDeferredNotice: 'الهدف النشط يتحكم بالجلسة حالياً.',
++      loopAwaitingResponse: 'في انتظار الاستجابة',
++      heartbeatActive: 'النبض نشط',
++      heartbeatPaused: 'النبض متوقف مؤقتاً',
++      heartbeatEveryMinutes: minutes => `كل ${minutes} د`,
++      heartbeatEveryHours: hours => `كل ${hours} س`,
++      heartbeatEverySeconds: seconds => `كل ${seconds} ث`,
++      heartbeatNext: time => `التالي ${time}`,
++      heartbeatActions: 'إجراءات النبض',
++      pauseHeartbeat: 'إيقاف النبض مؤقتاً',
++      resumeHeartbeat: 'استئناف النبض',
++      clearHeartbeat: 'مسح النبض',
++      clearHeartbeatConfirmTitle: 'مسح النبض؟',
++      clearHeartbeatConfirmBody: 'هل أنت متأكد من رغبتك في مسح هذا النبض؟',
++      heartbeatFiredCount: count => `انطلق ${count} مرة`,
++      actionFailed: msg => `فشل الإجراء: ${msg}`,
++      actionSucceeded: 'تم الإجراء بنجاح',
++      copySuccess: 'تم نسخ المعيار إلى الحافظة',
++      copyFailure: 'فشل نسخ المعيار إلى الحافظة',
++      continuationFailed: 'فشل إرسال متابعة الهدف',
++      continuationQueued: 'تم استئناف الهدف — المتابعة في قائمة الانتظار حتى انتهاء الدور الحالي',
++      continuationBusy: 'تم استئناف الهدف — الجلسة مشغولة، نفّذ /interrupt للدور الحالي للمتابعة',
++      controlUnavailable: msg => `عناصر تحكم الجلسة غير متاحة: ${msg}`,
++      dismissError: 'تجاهل الخطأ',
++      add: 'إضافة'
++    },
++    coding: {
++      title: 'شجرة العمل',
++      noBranch: 'لا يوجد فرع',
++      detached: 'منفصل',
++      clean: 'نظيف',
++      changed: count => `${count} مُغيَّر`,
++      ahead: count => `${count} متقدم`,
++      behind: count => `${count} متأخر`,
++      review: 'مراجعة',
++      close: 'إغلاق',
++      openChanges: 'فتح التغييرات',
++      openFile: 'فتح الملف',
++      stage: 'إدراج',
++      unstage: 'إلغاء الإدراج',
++      stageAll: 'إدراج الكل',
++      viewAsTree: 'عرض كشجرة',
++      viewAsList: 'عرض كقائمة',
++      revert: 'تراجع',
++      revertAll: 'التراجع عن الكل',
++      revertConfirm: 'هل تريد تجاهل التغييرات على هذا الملف واستعادته إلى الحالة المُودعة؟ لا يمكن التراجع عن هذا.',
++      revertAllConfirm: 'هل تريد تجاهل كل التغييرات واستعادة الملفات إلى الحالة المُودعة؟ لا يمكن التراجع عن هذا.',
++      staged: 'مُدرَج',
++      noChanges: 'لا توجد تغييرات',
++      notRepo: 'ليس مستودع git',
++      noDiff: 'لا يوجد فرق لعرضه',
++      scopeUncommitted: 'غير مُودَع',
++      scopeBranch: 'فرع',
++      scopeLastTurn: 'آخر دور',
++      commit: 'إيداع',
++      commitAndPush: 'إيداع ودفع',
++      commitPlaceholder: shortcut => `رسالة (${shortcut} للإيداع)`,
++      generateCommitMessage: 'توليد رسالة الإيداع',
++      stopGenerating: 'إيقاف التوليد',
++      createPr: 'إنشاء PR',
++      openPr: 'فتح PR',
++      ghMissing: 'ثبّت GitHub CLI (gh) وسجّل الدخول لفتح طلبات السحب',
++      agentShip: 'اطلب من Hermes فتح PR',
++      agentShipUnavailable: 'المحادثة التي تملك هذه التغييرات ليست على الشاشة.',
++      agentShipPrompt: 'راجع التغييرات الحالية، وأودعها برسالة إيداع تقليدية واضحة، وادفع الفرع، وافتح طلب سحب.',
++      newBranch: 'فرع جديد',
++      branchOffFrom: base => `فرع جديد من ${base}`,
++      switchTo: branch => `التبديل إلى ${branch}`,
++      switchFailed: branch => `تعذّر التبديل إلى ${branch}`,
++      worktrees: 'أشجار العمل'
++    }
++  },
++  updates: {
++    stages: {
++      idle: 'جار التحضير...',
++      prepare: 'جار التحضير...',
++      fetch: 'جار التنزيل...',
++      pull: 'أوشكنا على الانتهاء...',
++      pydeps: 'جار الإنهاء...',
++      update: 'جار تحديث Hermes...',
++      rebuild: 'جار إعادة بناء تطبيق سطح المكتب...',
++      restart: 'جار إعادة تشغيل Hermes...',
++      done: 'اكتمل التحديث',
++      manual: 'التحديث من الطرفية',
++      guiSkew: 'تحديث تطبيق سطح المكتب',
++      error: 'تم إيقاف التحديث مؤقتا'
++    },
++    checking: 'جار البحث عن تحديثات...',
++    checkFailedTitle: 'تعذّر التحقق من التحديثات',
++    tryAgain: 'إعادة المحاولة',
++    notAvailableTitle: 'التحديث غير متاح',
++    unsupportedMessage: 'لا يمكن لهذا الإصدار من Hermes تحديث نفسه من داخل التطبيق.',
++    connectionRetry: 'تحقق من اتصالك وأعد المحاولة.',
++    latestBody: 'أنت تستخدم أحدث إصدار.',
++    latestBodyBackend: 'الواجهة الخلفية تعمل بأحدث إصدار.',
++    allSetTitle: 'كل شيء جاهز',
++    availableTitle: 'يتوفر تحديث جديد',
++    availableBody: 'إصدار جديد من Hermes جاهز للتثبيت.',
++    availableTitleBackend: 'يتوفر تحديث للواجهة الخلفية',
++    availableBodyBackend: 'إصدار أحدث من واجهة Hermes الخلفية المتصلة جاهز للتثبيت.',
++    availableBodyNoChangelog: 'إصدار أحدث جاهز. ملاحظات الإصدار غير متاحة لنوع التثبيت هذا.',
++    updateNow: 'التحديث الآن',
++    maybeLater: 'ربما لاحقا',
++    moreChanges: count => `+ ${count} تغيير${count === 1 ? '' : 'ات'} إضافي مُضمَّن.`,
++    manualTitle: 'التحديث من الطرفية',
++    manualBody: 'لقد ثبّتت Hermes من سطر الأوامر، لذا تُجرى التحديثات من هناك أيضا. الصق هذا في طرفيتك:',
++    manualPickedUp: 'سيلتقط Hermes الإصدار الجديد في المرة التالية التي تشغّله فيها.',
++    guiSkewTitle: 'تحديث تطبيق سطح المكتب',
++    guiSkewBody:
++      'تم تحديث الواجهة الخلفية، لكن حزمة تطبيق سطح المكتب هذه لم تتغير. حدّث أو أعد تثبيت تطبيق Hermes لسطح المكتب (ملف AppImage / ‎.deb / ‎.rpm) لمطابقته.',
++    copy: 'نسخ',
++    copied: 'تم النسخ',
++    done: 'تم',
++    applyingBody:
++      'يتولّى مُحدِّث Hermes المهمة في نافذته الخاصة ويعيد فتح Hermes تلقائيا عند الانتهاء. الرجاء عدم إعادة فتح Hermes بنفسك أثناء التحديث.',
++    applyingBodyBackend:
++      'تطبّق الواجهة الخلفية البعيدة التحديث وستعيد التشغيل. يعيد Hermes الاتصال تلقائيا عند عودتها.',
++    applyingClose: 'ستُغلق هذه النافذة أثناء تشغيل التحديث، ثم يعيد Hermes فتح نفسه تلقائيا.',
++    errorTitle: 'لم يكتمل التحديث',
++    errorBody: 'لا داعي للقلق — لم يُفقد شيء. يمكنك إعادة المحاولة الآن.',
++    blockerTitle: 'إغلاق المعاينات المحلية لتحديث Hermes؟',
++    blockerBody: 'يحتاج Hermes إلى إيقاف هذه المعاينات المحلية قبل التحديث. لن يؤدي ذلك إلى تعديل ملفاتك أو حذفها.',
++    foreignBlockerTitle: 'أغلق العمليات الأخرى لتحديث Hermes',
++    foreignBlockerBody:
++      'لا يمكن لـ Hermes إغلاق هذه العمليات تلقائيًا بأمان. أغلق التطبيق أو الطرفية أو الخدمة التي تشغّل كل عملية، ثم حاول التحديث مرة أخرى.',
++    mixedBlockerBody:
++      'يمكن لـ Hermes إغلاق المعاينات المحلية المدرجة أدناه. يجب إغلاق العمليات الأخرى يدويًا قبل متابعة التحديث.',
++    closePreviewsAndUpdate: 'إغلاق المعاينات والتحديث',
++    closePreviewsAndCheckAgain: 'إغلاق المعاينات والتحقق مجددًا',
++    localPreview: 'معاينة محلية',
++    portLabel: port => `المنفذ ${port}`,
++    pidLabel: pid => `معرّف العملية ${pid}`,
++    technicalDetails: 'التفاصيل التقنية',
++    notNow: 'ليس الآن',
++    clientAlsoBehindTitle: 'تطبيق سطح المكتب متأخر',
++    clientAlsoBehindMessage:
++      'الخادم الخلفي محدث، لكن تطبيق سطح المكتب هذا لا يزال على إصدار أقدم. حدّثه للحصول على أحدث الإصلاحات.',
++    clientAlsoBehindAction: 'تحديث تطبيق سطح المكتب',
++    everythingDispatched: 'تم إرسال التحديث',
++    everythingSkipped: 'تم التخطي',
++    everythingRowFailed: 'فشل التحديث',
++    everythingFanoutFailedTitle: 'تعذر تحديث المثيلات الأخرى',
++    applyStatus: {
++      preparing: 'جار تحديث الواجهة الخلفية...',
++      pulling: 'جار تحديث الواجهة الخلفية...',
++      restarting: 'تعيد الواجهة الخلفية التشغيل لتحميل التحديث...',
++      notAvailable: 'التحديث غير متاح لهذه الواجهة الخلفية.',
++      failed: 'فشل تحديث الواجهة الخلفية.',
++      noReturn: 'لم تعد الواجهة الخلفية إلى الاتصال. قد لا يكون التحديث قد اكتمل — تحقق من مضيف الواجهة الخلفية.'
++    }
++  },
++  install: {
++    stageStates: {
++      pending: 'قيد الانتظار',
++      running: 'جار التثبيت',
++      succeeded: 'تم',
++      skipped: 'تم التخطي',
++      failed: 'فشل'
++    },
++    oneTimeTitle: 'يحتاج Hermes إلى تثبيت لمرة واحدة',
++    unsupportedDesc: platform =>
++      `التثبيت التلقائي عند أول تشغيل غير متاح على ${platform} بعد. افتح الطرفية وشغّل الأمر أدناه، ثم أعد تشغيل هذا التطبيق. ستتخطى عمليات التشغيل اللاحقة هذه الخطوة.`,
++    installCommand: 'أمر التثبيت',
++    copyCommand: 'نسخ الأمر',
++    viewDocs: 'عرض مستندات التثبيت',
++    installTo: 'سيتم التثبيت في',
++    retryAfterRun: 'لقد شغّلته -- إعادة المحاولة',
++    failedTitle: 'فشل التثبيت',
++    settingUpTitle: 'جار إعداد وكيل Hermes',
++    finishingTitle: 'جار الإنهاء',
++    failedDesc:
++      'فشلت إحدى خطوات التثبيت. على Windows، قد يحدث هذا إذا كان هناك نسخة أخرى من Hermes CLI أو تطبيق سطح المكتب قيد التشغيل. أوقف أي نسخ Hermes قيد التشغيل، ثم أعد المحاولة. تحقق من التفاصيل أدناه أو من سجل سطح المكتب للحصول على النص الكامل.',
++    activeDesc:
++      'هذا إعداد لمرة واحدة. يقوم مثبّت Hermes بتنزيل التبعيات وتهيئة جهازك. ستتخطى عمليات التشغيل اللاحقة هذه الخطوة.',
++    progress: (completed, total) => `اكتملت ${completed} من ${total} خطوة`,
++    currentStage: stage => ` -- الآن: ${stage}`,
++    fetchingManifest: 'جار جلب بيان المثبّت...',
++    error: 'خطأ',
++    hideOutput: 'إخفاء مخرجات المثبّت',
++    showOutput: 'إظهار مخرجات المثبّت',
++    lines: count => `${count} سطر`,
++    noOutput: 'لا توجد مخرجات بعد.',
++    cancelling: 'جار الإلغاء...',
++    cancelInstall: 'إلغاء التثبيت',
++    transcriptSaved: 'تم حفظ النص الكامل في',
++    copiedOutput: 'تم النسخ!',
++    copyOutput: 'نسخ المخرجات',
++    reloadRetry: 'إعادة التحميل وإعادة المحاولة'
++  },
++  onboarding: {
++    headerTitle: 'لنُعِدّ لك Hermes Agent',
++    headerDesc: 'اربط مزوّد نماذج لبدء المحادثة. معظم الخيارات تتطلب نقرة واحدة.',
++    preparingInstall: 'يُكمل Hermes التثبيت. عادة ما يستغرق ذلك أقل من دقيقة في أول تشغيل.',
++    starting: 'جار بدء Hermes...',
++    lookingUpProviders: 'جار البحث عن المزوّدين...',
++    collapse: 'طي',
++    otherProviders: 'مزودون آخرون',
++    haveApiKey: 'لديك مفتاح API',
++    chooseLater: 'سأختار مزوّدا لاحقا',
++    recommended: 'موصى به',
++    connected: 'متصل',
++    featuredPitch: 'اشتراك واحد، أكثر من 300 نموذج متقدم — الطريقة الموصى بها لتشغيل Hermes',
++    fireworksPitch: 'نماذج مفتوحة سريعة مع استضافة Fireworks.',
++    openRouterPitch: 'مفتاح واحد لمئات النماذج — خيار افتراضي جيد',
++    apiKeyOptions: {
++      openrouter: {
++        short: 'مفتاح واحد، نماذج كثيرة',
++        description: 'يستضيف مئات النماذج خلف مفتاح واحد. خيار افتراضي جيد للتثبيتات الجديدة.'
++      },
++      openai: {
++        short: 'نماذج من فئة GPT',
++        description: 'وصول مباشر إلى نماذج OpenAI.'
++      },
++      gemini: {
++        short: 'نماذج Gemini',
++        description: 'وصول مباشر إلى نماذج Google Gemini.'
++      },
++      xai: {
++        short: 'نماذج Grok',
++        description: 'وصول مباشر إلى نماذج xAI Grok.'
++      },
++      local: {
++        short: 'مستضاف ذاتيا',
++        description:
++          'وجّه Hermes إلى نقطة نهاية محلية أو مستضافة ذاتيا متوافقة مع OpenAI (vLLM، llama.cpp، Ollama، إلخ).'
++      }
++    },
++    backToSignIn: 'العودة إلى تسجيل الدخول',
++    getKey: 'الحصول على مفتاح',
++    replaceCurrent: 'استبدال القيمة الحالية',
++    pasteApiKey: 'ألصق مفتاح API',
++    localApiKeyPlaceholder: 'مفتاح API (اختياري — فقط إذا كانت نقطة النهاية تتطلبه)',
++    couldNotSave: 'تعذر حفظ بيانات الاعتماد.',
++    connecting: 'جار الاتصال',
++    update: 'تحديث',
++    flowSubtitles: {
++      pkce: 'يفتح المتصفح لتسجيل الدخول ثم يتابع هنا',
++      device_code: 'يفتح صفحة تحقق في المتصفح — يتصل Hermes تلقائياً',
++      loopback: 'يفتح المتصفح لتسجيل الدخول — يتصل Hermes تلقائياً',
++      external: 'سجل الدخول مرة واحدة في الطرفية ثم عد إلى المحادثة'
++    },
++    startingSignIn: provider => `جار بدء تسجيل الدخول لـ ${provider}...`,
++    verifyingCode: provider => `جار التحقق من الرمز عبر ${provider}...`,
++    connectedProvider: provider => `تم ربط ${provider}`,
++    connectedPicking: provider => `تم ربط ${provider}. جار اختيار نموذج افتراضي...`,
++    signInFailed: 'فشل تسجيل الدخول. حاول مرة أخرى.',
++    signInExpired:
++      'انتهت مهلة انتظار التفويض. السبب الأكثر شيوعًا هو تعطّل صفحة تسجيل الدخول في تبويب المتصفح (مشكلة من جهة الخادم) — أكمل تسجيل الدخول هناك ثم أعد المحاولة. إذا استمر الفشل، استخدم مفتاح API أو واجهة سطر الأوامر بدلاً من ذلك.',
++    pickDifferentProvider: 'اختر مزوداً آخر',
++    signInWith: provider => `تسجيل الدخول عبر ${provider}`,
++    openedBrowser: provider => `فتحنا ${provider} في المتصفح.`,
++    authorizeThere: 'صرّح لـ Hermes هناك.',
++    copyAuthCode: 'انسخ رمز التفويض وألصقه أدناه.',
++    pasteAuthCode: 'ألصق رمز التفويض',
++    reopenAuthPage: 'إعادة فتح صفحة التفويض',
++    autoBrowser: provider => `فتحنا ${provider} في المتصفح. صرّح لـ Hermes هناك وسيتم الاتصال تلقائياً دون نسخ أو لصق.`,
++    reopenSignInPage: 'إعادة فتح صفحة تسجيل الدخول',
++    waitingAuthorize: 'بانتظار التفويض...',
++    externalPending: provider =>
++      `${provider} يسجل الدخول عبر أداة سطر الأوامر الخاصة به. شغّل هذا الأمر في الطرفية، ثم عد واختر "سجلت الدخول":`,
++    signedIn: 'سجلت الدخول',
++    deviceCodeOpened: provider => `فتحنا ${provider} في المتصفح. أدخل هذا الرمز هناك:`,
++    reopenVerification: 'إعادة فتح صفحة التحقق',
++    copy: 'نسخ',
++    defaultModel: 'النموذج الافتراضي',
++    freeTier: 'الطبقة المجانية',
++    pro: 'مدفوع',
++    free: 'مجاني',
++    price: (input, output) => `${input} إدخال / ${output} إخراج لكل مليون رمز`,
++    change: 'تغيير',
++    startChatting: 'ابدأ',
++    docs: provider => `وثائق ${provider}`
++  },
++  modelPicker: {
++    title: 'اختيار النموذج',
++    current: 'الحالي',
++    unknown: 'غير معروف',
++    search: 'البحث عن نموذج...',
++    noModels: 'لا توجد نماذج',
++    addProvider: 'إضافة مزود',
++    loadFailed: 'فشل تحميل النماذج',
++    noAuthenticatedProviders: 'لا توجد مزودات مصادق عليها',
++    pro: 'Pro',
++    proNeedsSubscription: 'يتطلب اشتراكا',
++    free: 'مجاني',
++    freeTier: 'طبقة مجانية',
++    priceTitle: 'السعر'
++  },
++  modelVisibility: {
++    title: 'النماذج',
++    search: 'بحث في النماذج',
++    noAuthenticatedProviders: 'لا يوجد مزوّدون مصادق عليهم.',
++    addProvider: 'إضافة مزوّد…'
++  },
++  shell: {
++    windowControls: 'تحكم النافذة',
++    paneControls: 'تحكم اللوحات',
++    appControls: 'تحكم التطبيق',
++    modelMenu: {
++      search: 'البحث عن نموذج...',
++      noModels: 'لا توجد نماذج',
++      editModels: 'تحرير النماذج',
++      refreshModels: 'تحديث النماذج',
++      fast: 'سريع'
++    },
++    modelOptions: {
++      noOptions: 'لا توجد خيارات لهذا النموذج',
++      options: 'الخيارات',
++      thinking: 'التفكير',
++      fast: 'سريع',
++      effort: 'الجهد',
++      minimal: 'أدنى',
++      low: 'منخفض',
++      medium: 'متوسط',
++      high: 'عالٍ',
++      max: 'أقصى',
++      updateFailed: 'فشل تحديث خيار النموذج',
++      fastFailed: 'فشل تحديث الوضع السريع'
++    },
++    gatewayMenu: {
++      gateway: 'البوابة',
++      connected: 'متصل',
++      connecting: 'جار الاتصال',
++      offline: 'غير متصل',
++      inferenceReady: 'الاستدلال جاهز',
++      inferenceNotReady: 'الاستدلال غير جاهز',
++      checkingInference: 'جار فحص الاستدلال',
++      disconnected: 'منقطع',
++      reconnectGateway: 'إعادة الاتصال بالبوابة',
++      openSystem: 'فتح النظام',
++      connection: label => `الاتصال: ${label}`,
++      recentActivity: 'النشاط الأخير',
++      viewAllLogs: 'عرض كل السجلات',
++      messagingPlatforms: 'منصات المراسلة'
++    },
++    statusbar: {
++      unknown: 'غير معروف',
++      restart: 'إعادة تشغيل',
++      update: 'تحديث',
++      updateInProgress: 'التحديث جار',
++      commitsBehind: (count, branch) => `${count} commits خلف ${branch}`,
++      desktopVersion: version => `سطح المكتب ${version}`,
++      backendVersion: version => `الخلفية ${version}`,
++      clientLabel: version => `العميل ${version}`,
++      backendLabel: version => `الخلفية ${version}`,
++      commit: sha => `commit ${sha}`,
++      branch: branch => `الفرع ${branch}`,
++      closeCommandCenter: 'إغلاق مركز الأوامر',
++      openCommandCenter: 'فتح مركز الأوامر',
++      showTerminal: 'إظهار الطرفية',
++      hideTerminal: 'إخفاء الطرفية',
++      gateway: 'البوابة',
++      gatewayReady: 'البوابة جاهزة',
++      gatewayNeedsSetup: 'البوابة تحتاج إعدادا',
++      gatewayUnavailable: 'الاستدلال غير متاح',
++      gatewayChecking: 'جار فحص البوابة',
++      gatewayConnecting: 'جار اتصال البوابة',
++      gatewayOffline: 'البوابة غير متصلة',
++      gatewayRestarting: 'جار إعادة التشغيل...',
++      gatewayTitle: 'البوابة',
++      agents: 'الوكلاء',
++      closeAgents: 'إغلاق الوكلاء',
++      openAgents: 'فتح الوكلاء',
++      subagents: count => `${count} وكيل فرعي`,
++      failed: count => `${count} فشل`,
++      running: count => `${count} يعمل`,
++      cron: 'المهام',
++      openCron: 'فتح المهام المجدولة',
++      turnRunning: 'الدور يعمل',
++      contextUsage: 'استخدام السياق',
++      session: 'الجلسة',
++      yoloOn: 'YOLO مفعل',
++      yoloOff: 'YOLO معطل',
++      modelNone: 'لا نموذج',
++      noModel: 'لا يوجد نموذج',
++      switchModel: 'تبديل النموذج',
++      openModelPicker: 'فتح اختيار النموذج',
++      modelPinned: 'النموذج مثبت',
++      modelTitle: (provider, model) => `${provider}: ${model}`,
++      providerModelTitle: (provider, model) => `${provider}: ${model}`
++    }
++  },
++  rightSidebar: {
++    aria: 'الشريط الجانبي الأيمن',
++    panelsAria: 'لوحات الشريط الأيمن',
++    files: 'الملفات',
++    terminal: 'الطرفية',
++    noFolderSelected: 'لم يتم اختيار مجلد',
++    changeCwdTitle: 'تغيير مجلد العمل',
++    remotePickerTitle: 'اختر مجلدا بعيدا',
++    remotePickerDescription: 'استعرض المجلدات على الخادم الخلفي المتصل.',
++    remotePickerSelect: 'تحديد المجلد',
++    folderTip: cwd => cwd,
++    openFolder: 'فتح مجلد',
++    refreshTree: 'تحديث الشجرة',
++    collapseAll: 'طي الكل',
++    previewUnavailable: 'المعاينة غير متاحة',
++    couldNotPreview: path => `تعذرت معاينة ${path}`,
++    noProjectTitle: 'لا يوجد مشروع',
++    noProjectBody: 'اختر مجلد عمل لعرض الملفات.',
++    noProjectOpen: 'لا يوجد مشروع مفتوح',
++    noDiffs: 'لا توجد فروقات',
++    unreadableTitle: 'تعذر قراءة المجلد',
++    unreadableBody: error => `السبب: ${error}`,
++    emptyTitle: 'المجلد فارغ',
++    emptyBody: 'لا توجد ملفات للعرض.',
++    treeErrorTitle: 'فشل تحميل شجرة الملفات',
++    treeErrorBody: 'حاول التحديث أو اختر مجلدا آخر.',
++    tryAgain: 'حاول مرة أخرى',
++    loadingTree: 'جار تحميل الشجرة...',
++    loadingFiles: 'جار تحميل الملفات...',
++    terminalHide: 'إخفاء الطرفية',
++    addToChat: 'إضافة للمحادثة'
++  },
++  preview: {
++    tab: 'معاينة',
++    closePane: 'إغلاق جزء المعاينة',
++    loading: 'جار تحميل المعاينة',
++    unavailable: 'المعاينة غير متاحة',
++    opening: 'جار الفتح...',
++    hide: 'إخفاء',
++    openPreview: 'فتح المعاينة',
++    openInBrowser: 'فتح في المتصفح',
++    openInExternal: 'فتح في الخارج',
++    popIn: 'إدخال',
++    popOut: 'إخراج',
++    linkHint: '⌘/Ctrl-نقر لجزء المعاينة',
++    sourceLineTitle: 'انقر للتحديد · shift-نقر للتوسيع · اسحب إلى المُنشئ',
++    source: 'المصدر',
++    renderedPreview: 'المعاينة',
++    diff: 'الفرق',
++    unknownSize: 'حجم غير معروف',
++    binaryTitle: 'يبدو هذا ملفا ثنائيا',
++    binaryBody: label => `قد تعرض معاينة ${label} نصا غير قابل للقراءة.`,
++    largeTitle: 'هذا الملف كبير',
++    largeBody: (label, size) => `حجم ${label} هو ${size}. سيعرض Hermes أول 512 KB فقط.`,
++    previewAnyway: 'معاينة على أي حال',
++    truncated: 'عرض أول 512 KB.',
++    noInlineTitle: 'لا توجد معاينة مضمّنة',
++    noInlineBody: mimeType => `${mimeType || 'هذا النوع من الملفات'} لا يزال بالإمكان إرفاقه كسياق.`,
++    edit: 'تحرير',
++    editing: 'جار التحرير',
++    unsavedChanges: 'تغييرات غير محفوظة',
++    saveFailed: message => `تعذّر الحفظ: ${message}`,
++    diskChangedTitle: 'تغيّر الملف على القرص',
++    diskChangedBody: 'تغيّر هذا الملف منذ أن فتحته. هل تريد الكتابة فوقه بنسختك، أم تجاهل تعديلاتك وإعادة التحميل؟',
++    overwrite: 'الكتابة فوقه',
++    discardReload: 'تجاهل وإعادة التحميل',
++    console: {
++      deselect: 'إلغاء تحديد الإدخال',
++      select: 'تحديد الإدخال',
++      copyFailed: 'تعذّر نسخ مخرجات الكونسول',
++      copyEntry: 'نسخ هذا الإدخال',
++      sendEntry: 'إرسال هذا الإدخال إلى المحادثة',
++      messages: count => `${count} رسائل كونسول`,
++      resize: 'تغيير حجم كونسول المعاينة',
++      title: 'كونسول المعاينة',
++      selected: count => `${count} محدد`,
++      sendToChat: 'إرسال إلى المحادثة',
++      copySelected: 'نسخ المحدد إلى الحافظة',
++      copyAll: 'نسخ الكل إلى الحافظة',
++      copy: 'نسخ',
++      clear: 'مسح',
++      empty: 'لا توجد رسائل كونسول بعد.',
++      promptHeader: 'كونسول المعاينة:',
++      sentTitle: 'تم الإرسال إلى المحادثة',
++      sentMessage: count => `أُضيف ${count} ${count === 1 ? 'إدخال سجل' : 'إدخالات سجل'} إلى المُنشئ`
++    },
++    web: {
++      appFailedToBoot: 'فشل إقلاع تطبيق المعاينة',
++      serverNotFound: 'الخادم غير موجود',
++      remoteLoopback:
++        'يشير هذا العنوان إلى الجهاز الذي يشغّل الوكيل، وليس هذا الجهاز. تحمّل لوحة المتصفح الصفحات محليًا، لذا يحتاج خادم التطوير البعيد إلى إعادة توجيه منفذ أو اسم مضيف يمكن الوصول إليه.',
++      failedToLoad: 'فشل تحميل المعاينة',
++      tryAgain: 'إعادة المحاولة',
++      restarting: 'جار إعادة تشغيل Hermes...',
++      askRestart: 'اطلب من Hermes إعادة تشغيل الخادم',
++      lookingRestart: taskId => `يبحث Hermes عن خادم معاينة لإعادة تشغيله (${taskId})`,
++      restartingTitle: 'جار إعادة تشغيل خادم المعاينة',
++      restartingMessage: 'يعمل Hermes في الخلفية. راقب كونسول المعاينة لمتابعة التقدم.',
++      startRestartFailed: message => `تعذّر بدء إعادة تشغيل الخادم: ${message}`,
++      restartFailed: 'فشلت إعادة تشغيل الخادم',
++      hideConsole: 'إخفاء كونسول المعاينة',
++      showConsole: 'إظهار كونسول المعاينة',
++      hideDevTools: 'إخفاء DevTools المعاينة',
++      openDevTools: 'فتح DevTools المعاينة',
++      goBack: 'رجوع',
++      goForward: 'تقدم',
++      reload: 'إعادة تحميل الصفحة',
++      address: 'العنوان',
++      addressPlaceholder: 'أدخل العنوان',
++      blankPageBody: 'اكتب عنوانًا في الأعلى للتصفح، أو اطلب من Hermes فتح صفحة.',
++      finishedRestarting: message => `أنهى Hermes إعادة تشغيل خادم المعاينة${message ? `: ${message}` : ''}`,
++      failedRestarting: message => `فشلت إعادة تشغيل الخادم: ${message}`,
++      unknownError: 'خطأ غير معروف',
++      restartedTitle: 'تمت إعادة تشغيل خادم المعاينة',
++      reloadingNow: 'جار إعادة تحميل المعاينة الآن.',
++      restartFailedTitle: 'فشلت إعادة تشغيل المعاينة',
++      restartFailedMessage: 'تعذّر على Hermes إعادة تشغيل الخادم.',
++      stillWorking:
++        'لا يزال Hermes يعمل، لكن لم تصل نتيجة إعادة التشغيل بعد. قد يكون أمر الخادم قيد التشغيل في المقدمة.',
++      workspaceReloading: 'تغيّرت مساحة العمل، جار إعادة تحميل المعاينة',
++      fileChanged: url => `تغيّر الملف، جار إعادة تحميل المعاينة: ${url}`,
++      filesChanged: (count, url) => `${count} تغييرات ملفات، جار إعادة تحميل المعاينة: ${url}`,
++      watchFailed: message => `تعذّر مراقبة ملف المعاينة: ${message}`,
++      moduleMimeDescription:
++        'يتم تقديم نصوص الوحدات بنوع MIME خاطئ. عادة ما يعني هذا أن خادم ملفات ثابتة يقدّم تطبيق Vite/React بدلا من خادم تطوير المشروع.',
++      loadFailedConsole: (code, message) => `فشل التحميل${code ? ` (${code})` : ''}: ${message}`,
++      unreachableDescription: 'تعذّر الوصول إلى صفحة المعاينة.',
++      openTarget: url => `فتح ${url}`,
++      fallbackTitle: 'معاينة'
++    }
++  },
++  zones: {
++    showTabStrip: 'إظهار علامات التبويب',
++    hideTabStrip: 'إخفاء علامات التبويب',
++    showStripTab: title => `إظهار ${title}`,
++    hideStripTab: title => `إخفاء ${title}`,
++    lastTabKeptTitle: 'يبقى آخر تبويب',
++    lastTabKeptBody:
++      'تحتاج هذه المنطقة إلى تبويب مرئي واحد على الأقل. أظهر تبويبا آخر أولا، أو اطو الشريط الجانبي بأكمله.',
++    toggleStripTab: title => `تبديل تبويب ${title}`,
++    minimize: 'تصغير',
++    restore: 'استعادة',
++    closeRunningTitle: 'إغلاق تبويب يعمل؟',
++    closeRunningBody:
++      'هذه المحادثة ما زالت تعمل (أو تنتظر إدخالك). إغلاق التبويب يخفيها فقط — ستحتفظ الجلسة بتقدمها ويمكن إعادة فتحها من الشريط الجانبي.',
++    closeRunningConfirm: 'إغلاق التبويب',
++    reload: 'إعادة التحميل',
++    closeOthers: 'إغلاق الأخرى',
++    closeToRight: 'إغلاق ما على اليمين',
++    closeAll: 'إغلاق الكل',
++    pluginDisabled: pluginId => `الإضافة "${pluginId}" معطلة`,
++    pluginDisabledBody: 'أعد تفعيلها من القدرات ← الإضافات لإرجاع اللوحة.',
++    missingPane: paneId => `لوحة مفقودة: ${paneId}`,
++    editTitle: 'التخطيطات',
++    editHint: 'اختر تخطيطا، أو اسحب اللوحات بين المناطق.',
++    reset: 'إعادة ضبط',
++    templates: 'القوالب',
++    custom: 'مخصص',
++    newGridLayout: 'تخطيط شبكة جديد',
++    saveCurrentAs: 'حفظ الترتيب الحالي كقالب',
++    nameLayoutPlaceholder: 'سم هذا التخطيط...',
++    deletePreset: name => `حذف ${name}`,
++    zoneEditorTitle: 'محرر المناطق',
++    editorHintPre: 'انقر للتقسيم · ',
++    editorHintPost: ' يعكس الخط · اسحب عبر المناطق للدمج · اسحب الحواف المشتركة لتغيير الحجم',
++    templateColumns: 'أعمدة',
++    templateRows: 'صفوف',
++    templateGrid: 'شبكة',
++    templatePriority: 'أولوية',
++    zoneTag: index => `منطقة ${index}`,
++    mergeZones: count => `دمج ${count} مناطق`,
++    customZoneName: count => `مخصص من ${count} مناطق`,
++    layoutNamePlaceholder: fallback => `اسم التخطيط (${fallback})`,
++    saveApply: 'حفظ وتطبيق',
++    notExpressible: 'هذا الترتيب متشابك — لا يمكن تمثيله كتقسيمات متداخلة بعد',
++    zoneCount: count => `${count} مناطق`,
++    tabCount: count => `${count} تبويبات`
++  },
++  contextMenu: {
++    link: {
++      openInApp: 'فتح في متصفح التطبيق',
++      openExternal: 'فتح في المتصفح الخارجي',
++      copyUrl: 'نسخ الرابط',
++      copyResolvedUrl: 'نسخ الرابط المُحلَّل'
++    },
++    image: {
++      copyImage: 'نسخ الصورة',
++      copyImageAddress: 'نسخ عنوان الصورة',
++      saveImageAs: 'حفظ الصورة باسم…'
++    },
++    edit: {
++      cut: 'قص',
++      paste: 'لصق',
++      selectAll: 'تحديد الكل',
++      addToDictionary: 'إضافة إلى القاموس'
++    },
++    page: {
++      copyPageUrl: 'نسخ رابط الصفحة',
++      inspectElement: 'فحص العنصر'
++    }
++  },
++  assistant: {
++    thread: {
++      loadingSession: 'جار تحميل الجلسة...',
++      showEarlier: 'عرض الرسائل الأقدم',
++      loadingResponse: 'جار تحميل الرد...',
++      resumeWhenBackgroundDone: count =>
++        count === 1 ? 'سيُستأنف عند انتهاء المهمة الخلفية' : `سيُستأنف عند انتهاء ${count} مهام خلفية`,
++      thinking: 'يفكر...',
++      thought: 'فكّر',
++      thoughtBriefly: 'فكّر قليلاً',
++      thoughtFor: duration => `فكّر لمدة ${duration}`,
++      turnDuration: duration => `استغرقت هذه الجولة ${duration}`,
++      today: time => `اليوم ${time}`,
++      yesterday: time => `أمس ${time}`,
++      copy: 'نسخ',
++      refresh: 'تحديث',
++      moreActions: 'إجراءات إضافية',
++      branchNewChat: 'تفريع إلى محادثة جديدة',
++      react: 'تفاعل',
++      dismissError: 'تجاهل الخطأ',
++      errorLayers: {
++        auth: 'خطأ في المصادقة',
++        billing: 'نفاد الرصيد',
++        disk: 'القرص ممتلئ',
++        endpoint: 'خطأ في نقطة النهاية المخصصة',
++        gateway: 'خطأ في البوابة',
++        generic: 'فشلت الجولة',
++        provider: 'خطأ من المزوّد',
++        runtime: 'خطأ في بيئة التشغيل المحلية',
++        streaming: 'خطأ في اتصال البث'
++      },
++      errorRetry: 'إعادة المحاولة',
++      errorStartNewSession: 'بدء جلسة جديدة',
++      errorSwitchProvider: 'تبديل المزوّد',
++      errorSignInAgain: provider => `تسجيل الدخول إلى ${provider} مجدداً`,
++      errorOauthExpired: provider =>
++        `انتهت صلاحية تسجيل دخولك إلى ${provider} أو تم إلغاؤه. سجّل الدخول مجدداً لمتابعة المحادثة.`,
++      errorOpenLogs: 'فتح السجلات',
++      errorOpenLogsFailed: 'تعذّر فتح مجلد السجلات',
++      errorOpenDesktopLogs: 'فتح سجلات سطح المكتب',
++      errorCopyDiagnostics: 'نسخ تفاصيل الخطأ',
++      errorSendDiagnostics: 'إرسال التشخيصات',
++      filesChanged: count => `${count} ملفات تم تغييرها`,
++      reviewChanges: 'مراجعة',
++      readAloudFailed: 'فشلت القراءة بصوت عال',
++      preparingAudio: 'جار تجهيز الصوت',
++      stopReading: 'إيقاف القراءة',
++      readAloud: 'قراءة بصوت عال',
++      editMessage: 'تحرير الرسالة',
++      scrollToBottom: 'التمرير إلى الأسفل',
++      stop: 'إيقاف',
++      restorePrevious: 'استعادة السابق',
++      restoreCheckpoint: 'استعادة النقطة',
++      restoreFromHere: 'استعادة نقطة التحقق — إعادة التشغيل من هذا الموجّه',
++      restoreTitle: 'الاستعادة إلى نقطة التحقق هذه؟',
++      restoreBody: 'يُزال كل ما يلي هذا الموجّه من المحادثة، ويُعاد تشغيل الموجّه من هنا.',
++      restoreConfirm: 'استعادة وإعادة تشغيل',
++      restoreNext: 'استعادة التالي',
++      goForward: 'تقدم',
++      sendEdited: 'إرسال التعديل',
++      attachingFile: 'جار إرفاق الملف'
++    },
++    approval: {
++      gatewayDisconnected: 'البوابة غير متصلة',
++      sendFailed: 'فشل الإرسال',
++      run: 'تشغيل',
++      command: 'الأمر',
++      moreOptions: 'خيارات إضافية',
++      allowSession: 'السماح لهذه الجلسة',
++      alwaysAllowMenu: 'السماح دائما',
++      jumpToApproval: 'الموافقة مطلوبة',
++      reject: 'رفض',
++      alwaysTitle: 'السماح دائما',
++      alwaysDescription: pattern => `السماح دائما بالأوامر المطابقة لـ ${pattern}`,
++      alwaysAllow: 'السماح دائما'
++    },
++    clarify: {
++      notReady: 'غير جاهز',
++      gatewayDisconnected: 'البوابة غير متصلة',
++      sendFailed: 'فشل الإرسال',
++      loadingQuestion: 'جار تحميل السؤال...',
++      other: 'غير ذلك',
++      placeholder: 'اكتب إجابتك...',
++      skip: 'تخطي',
++      continueLabel: 'متابعة',
++      confirmAndContinueLabel: 'تأكيد ومتابعة',
++      answeredBadge: 'تمت الإجابة',
++      questionProgress: (answered, total) => `تمت الإجابة على ${answered} من ${total}`
++    },
++    tool: {
++      copyCode: 'نسخ الكود',
++      renderingImage: 'جار عرض الصورة...',
++      copyOutput: 'نسخ الإخراج',
++      copyCommand: 'نسخ الأمر',
++      copyContent: 'نسخ المحتوى',
++      copyUrl: 'نسخ الرابط',
++      copyResults: 'نسخ النتائج',
++      copyQuery: 'نسخ الاستعلام',
++      copyFile: 'نسخ الملف',
++      copyPath: 'نسخ المسار',
++      outputAlt: 'إخراج الأداة',
++      rawResponse: 'الرد الخام',
++      copyActivity: 'نسخ النشاط',
++      recoveredOne: 'تم الاسترداد',
++      recoveredMany: count => `تم استرداد ${count}`,
++      failedOne: 'فشل',
++      failedMany: count => `فشل ${count}`,
++      statusRunning: 'يعمل',
++      statusError: 'خطأ',
++      statusRecovered: 'تم الاسترداد',
++      statusDone: 'تم',
++      memoryWriteNoted: 'تم تسجيل كتابة الذاكرة',
++      actions: {
++        read: 'قراءة',
++        reading: 'جار القراءة',
++        opened: 'تم الفتح',
++        opening: 'جار الفتح',
++        searched: 'تم البحث',
++        searching: 'جار البحث',
++        ran: 'تم التشغيل',
++        running: 'جار التشغيل',
++        ranCode: 'تم تشغيل الكود',
++        runningCode: 'جار البرمجة'
++      },
++      prefixes: {
++        browser: 'المتصفح',
++        web: 'الويب'
++      },
++      titleTemplates: {
++        actionCommand: (action, command) => `${action} ${command}`,
++        actionQuoted: (action, value) => `${action} “${value}”`,
++        actionTarget: (action, target) => `${action} ${target}`,
++        prefixedDone: (prefix, action) => `${prefix} ${action}`,
++        runningPrefixedTool: (prefix, action) => `جار تشغيل ${prefix.toLowerCase()} ${action.toLowerCase()}`,
++        runningTool: action => `جار تشغيل ${action.toLowerCase()}`
++      },
++      inspector: {
++        previewLimit: (count: number) =>
++          `تم إخفاء ${count.toLocaleString()} حرفًا إضافيًا في المعاينة — افتح تفاصيل الأداة لفحص البيانات المتاحة.`,
++        open: 'فتح تفاصيل الأداة',
++        title: 'تفاصيل الأداة',
++        notice:
++          'لقطة للبيانات المتاحة عند الفتح. أغلقها وأعد فتحها للتحديث. لا يمكن استعادة البيانات المقتطعة على الخادم أو غير المحفوظة هنا.',
++        search: 'بحث في القسم (حساس لحالة الأحرف)',
++        previousMatch: 'التطابق السابق',
++        nextMatch: 'التطابق التالي',
++        wrap: 'التفاف الأسطر',
++        copySection: 'نسخ القسم',
++        noMatch: 'لا يوجد تطابق في هذا القسم المتاح.',
++        unavailable: 'لم يتم استلام قيمة.',
++        empty: 'سلسلة فارغة',
++        serializationFailed: 'تعذر تحويل هذه القيمة إلى نص.',
++        previousPage: 'الصفحة السابقة',
++        nextPage: 'الصفحة التالية',
++        range: (start: number, end: number, total: number) =>
++          `${start.toLocaleString()}–${end.toLocaleString()} / ${total.toLocaleString()}`,
++        sections: {
++          args: 'الوسائط',
++          result: 'النتيجة',
++          metadata: 'البيانات الوصفية',
++          command: 'الأمر',
++          stdout: 'stdout',
++          stderr: 'stderr',
++          diff: 'الفروقات'
++        }
++      },
++      titles: {
++        browser_click: {
++          done: 'تم النقر على عنصر الصفحة',
++          pending: 'جار النقر على عنصر الصفحة',
++          pendingAction: 'جار النقر'
++        },
++        browser_fill: {
++          done: 'تم ملء حقل النموذج',
++          pending: 'جار ملء حقل النموذج',
++          pendingAction: 'جار الملء'
++        },
++        browser_navigate: {
++          done: 'تم فتح الصفحة',
++          pending: 'جار فتح الصفحة',
++          pendingAction: 'جار الفتح'
++        },
++        browser_snapshot: {
++          done: 'تم التقاط لقطة الصفحة',
++          pending: 'جار التقاط لقطة الصفحة',
++          pendingAction: 'جار الالتقاط'
++        },
++        browser_take_screenshot: {
++          done: 'تم التقاط لقطة الشاشة',
++          pending: 'جار التقاط لقطة الشاشة',
++          pendingAction: 'جار الالتقاط'
++        },
++        browser_type: {
++          done: 'تمت الكتابة على الصفحة',
++          pending: 'جار الكتابة على الصفحة',
++          pendingAction: 'جار الكتابة'
++        },
++        clarify: {
++          done: 'تم طرح سؤال',
++          pending: 'جار طرح سؤال',
++          pendingAction: 'جار السؤال'
++        },
++        cronjob: {
++          done: 'مهمة مجدولة',
++          pending: 'جار جدولة المهمة',
++          pendingAction: 'جار الجدولة'
++        },
++        edit_file: {
++          done: 'تم تحرير الملف',
++          pending: 'جار تحرير الملف',
++          pendingAction: 'جار التحرير'
++        },
++        execute_code: {
++          done: 'تم تشغيل الكود',
++          pending: 'جار البرمجة',
++          pendingAction: 'جار البرمجة'
++        },
++        image_generate: {
++          done: 'تم إنشاء الصورة',
++          pending: 'جار إنشاء الصورة',
++          pendingAction: 'جار الإنشاء'
++        },
++        list_files: {
++          done: 'تم سرد الملفات',
++          pending: 'جار سرد الملفات',
++          pendingAction: 'جار السرد'
++        },
++        memory: {
++          done: 'تم الحفظ في الذاكرة',
++          pending: 'جار الحفظ في الذاكرة',
++          pendingAction: 'جار الحفظ'
++        },
++        patch: {
++          done: 'تم تصحيح الملف',
++          pending: 'جار تصحيح الملف',
++          pendingAction: 'جار التصحيح'
++        },
++        read_file: {
++          done: 'تمت قراءة الملف',
++          pending: 'جار قراءة الملف',
++          pendingAction: 'جار القراءة'
++        },
++        search_files: {
++          done: 'تم البحث في الملفات',
++          pending: 'جار البحث في الملفات',
++          pendingAction: 'جار البحث'
++        },
++        session_search_recall: {
++          done: 'تم البحث في سجل الجلسة',
++          pending: 'جار البحث في سجل الجلسة',
++          pendingAction: 'جار البحث'
++        },
++        terminal: {
++          done: 'تم تشغيل الأمر',
++          pending: 'جار تشغيل الأمر',
++          pendingAction: 'جار التشغيل'
++        },
++        todo: {
++          done: 'تم تحديث المهام',
++          pending: 'جار تحديث المهام',
++          pendingAction: 'جار التحديث'
++        },
++        vision_analyze: {
++          done: 'تم تحليل الصورة',
++          pending: 'جار تحليل الصورة',
++          pendingAction: 'جار التحليل'
++        },
++        web_extract: {
++          done: 'تمت قراءة صفحة الويب',
++          pending: 'جار قراءة صفحة الويب',
++          pendingAction: 'جار القراءة'
++        },
++        web_search: {
++          done: 'تم البحث في الويب',
++          pending: 'جار البحث في الويب',
++          pendingAction: 'جار البحث'
++        },
++        write_file: {
++          done: 'تم تحرير الملف',
++          pending: 'جار تحرير الملف',
++          pendingAction: 'جار التحرير'
++        }
++      }
++    }
++  },
++  prompts: {
++    gatewayDisconnected: 'البوابة غير متصلة',
++    sudoSendFailed: 'فشل إرسال كلمة مرور sudo',
++    secretSendFailed: 'فشل إرسال السر',
++    sudoTitle: 'مطلوب sudo',
++    sudoDesc: 'أدخل كلمة المرور لمتابعة الأمر.',
++    sudoPlaceholder: 'كلمة المرور',
++    secretTitle: 'مطلوب سر',
++    secretDesc: 'أدخل القيمة المطلوبة لمتابعة المهمة.',
++    secretPlaceholder: 'القيمة السرية'
++  },
++  desktop: {
++    audioReadFailed: 'فشلت قراءة الصوت',
++    sessionUnavailable: 'الجلسة غير متاحة',
++    createSessionFailed: 'فشل إنشاء الجلسة',
++    promptFailed: 'فشل إرسال الرسالة',
++    providerCredentialRequired: 'مطلوب اعتماد المزود',
++    emptySlashCommand: 'أمر slash فارغ',
++    desktopCommands: 'أوامر سطح المكتب',
++    skillCommandsAvailable: count => `${count} أمر مهارة متاح`,
++    warningLine: message => `تحذير: ${message}`,
++    yoloArmed: 'YOLO مفعل',
++    yoloOff: 'YOLO معطل',
++    yoloSystem: active => (active ? 'YOLO مفعل للنظام' : 'YOLO معطل للنظام'),
++    yoloTitle: 'وضع YOLO',
++    yoloToggleFailed: 'فشل تبديل YOLO',
++    profileStatus: current => `الملف الحالي: ${current}`,
++    unknownProfile: 'ملف شخصي غير معروف',
++    noProfileNamed: (target, available) => `لا يوجد ملف باسم ${target}. المتاح: ${available}`,
++    newChatsProfile: name => `المحادثات الجديدة تستخدم ${name}`,
++    setProfileFailed: 'فشل ضبط الملف الشخصي',
++    sttDisabled: 'تحويل الكلام إلى نص معطل',
++    stopFailed: 'فشل الإيقاف',
++    regenerateFailed: 'فشلت إعادة التوليد',
++    editFailed: 'فشل التحرير',
++    editTurnUnavailable: 'هذه الجولة لم تعد في سجل الخادم (ربما أزيلت بالضغط).',
++    resumeFailed: 'فشل الاستئناف',
++    readOnlyTranscriptTitle: 'فُتحت للقراءة فقط',
++    readOnlyTranscriptBody:
++      'لا يوجد بعد خادم متصل يملك هذه المحادثة القديمة، لذا فُتحت كنصّ محفوظ للقراءة فقط. السجل سليم؛ الإرسال معطّل حتى يتبنّاها خادم.',
++    readOnlyTranscriptSendBlocked: 'هذه المحادثة مفتوحة كنصّ محفوظ للقراءة فقط — الإرسال معطّل.',
++    resumeStrandedTitle: 'تعذّر تحميل هذه الجلسة',
++    resumeStrandedBody:
++      'فشل الاتصال بهذه الجلسة وتوقفت إعادة المحاولة التلقائية. تأكد من تشغيل البوابة، ثم حاول مجددا.',
++    resumeRetry: 'إعادة المحاولة',
++    nothingToBranch: 'لا يوجد ما يمكن تفريعه',
++    branchNeedsChat: 'يحتاج التفريع إلى محادثة',
++    sessionBusy: 'الجلسة مشغولة',
++    branchStopCurrent: 'أوقف الدور الحالي قبل التفريع',
++    branchNoText: 'لا يوجد نص للتفريع',
++    branchTitle: n => `مسودة: تفريع #${n}`,
++    branchFailed: 'فشل التفريع',
++    deleteFailed: 'فشل الحذف',
++    archived: 'تمت الأرشفة',
++    archiveFailed: 'فشلت الأرشفة',
++    cwdChangeFailed: 'فشل تغيير مجلد العمل',
++    cwdStagedTitle: 'تم تجهيز مجلد العمل',
++    cwdStagedMessage: 'سيطبق مجلد العمل على الرسالة التالية.',
++    modelSwitchFailed: 'فشل تبديل النموذج',
++    hydrationSyncing: (profile: string) => `جارٍ مزامنة ${profile}\u2026`,
++    sessionExported: 'تم تصدير الجلسة',
++    sessionExportFailed: 'فشل تصدير الجلسة',
++    imageSaved: 'تم حفظ الصورة',
++    downloadStarted: 'بدأ التنزيل',
++    restartToUseSaveImage: 'أعد التشغيل لاستخدام حفظ الصور',
++    restartToSaveImages: 'أعد التشغيل لحفظ الصور',
++    imageDownloadFailed: 'فشل تنزيل الصورة',
++    openImage: 'فتح الصورة',
++    downloadImage: 'تنزيل الصورة',
++    savingImage: 'جار حفظ الصورة',
++    imagePreviewFailed: 'فشلت معاينة الصورة',
++    imageAttach: 'إرفاق الصورة',
++    imageWriteFailed: 'فشل كتابة الصورة',
++    imageAttachFailed: 'فشل إرفاق الصورة',
++    attachImages: 'إرفاق الصور',
++    clipboard: 'الحافظة',
++    noClipboardImage: 'لا توجد صورة في الحافظة',
++    clipboardPasteFailed: 'فشل اللصق من الحافظة',
++    dropFiles: 'أفلت الملفات هنا',
++    handoff: {
++      pickPlatform: 'اختر وجهة',
++      success: platform => `تم التسليم إلى ${platform}. استأنف هنا في أي وقت.`,
++      systemNote: platform => `↻ تم التسليم إلى ${platform} — استأنف هنا في أي وقت.`,
++      failed: error => `فشل التسليم: ${error}`,
++      timedOut: 'انتهت المهلة في انتظار البوابة. هل `hermes gateway` قيد التشغيل؟'
++    }
++  },
++  errors: {
++    genericFailure: 'حدث خطأ',
++    boundaryTitle: 'تعطل جزء من الواجهة',
++    boundaryDesc: 'يمكنك إعادة تحميل النافذة أو فتح السجلات لمعرفة التفاصيل.',
++    reloadWindow: 'إعادة تحميل النافذة',
++    openLogs: 'فتح السجلات'
++  },
++  tips: {
++    close: 'لا تعرض هذه النصيحة مرة أخرى',
++    items: {
++      'new-session': {
++        title: 'ابدأ من جديد',
++        text: 'كل محادثة جديدة لها سياقها وطرفيتها ومجلد عملها الخاص.'
++      },
++      skills: {
++        title: 'علّمه مرة واحدة',
++        text: 'المهارات مجلدات من التعليمات يحمّلها Hermes عندما يقتضي العمل ذلك.'
++      },
++      messaging: {
++        title: 'Hermes بعيدًا عن مكتبك',
++        text: 'اربطه بـ Telegram وDiscord وSlack وغيرها — الوكيل نفسه والذاكرة نفسها.'
++      },
++      artifacts: {
++        title: 'كل ما صنعه Hermes',
++        text: 'الصور والملفات والروابط من كل الجلسات، مفهرسة في مكان واحد.'
++      },
++      cron: {
++        title: 'عمل يجري من تلقاء نفسه',
++        text: 'جدوِل موجّهًا كل ساعة أو كل ليلة أو وفق تعبير cron.'
++      },
++      'command-palette': {
++        title: 'صندوق واحد لكل شيء',
++        text: 'الجلسات والإعدادات والمهارات والأوامر كلها تستجيب للوحة الأوامر.'
++      },
++      profiles: {
++        title: 'الملفات الشخصية منفصلة',
++        text: 'كل واحد منها Hermes مستقل — مفاتيحه وذاكرته وجلساته الخاصة.'
++      },
++      'composer-mentions': {
++        title: 'المرفقات والأوامر',
++        text: 'اكتب @ لإحضار ملف إلى المحادثة، و / لتشغيل أمر.'
++      },
++      'local-setup': {
++        title: 'هذا الجهاز يمكنه تشغيل النماذج محليًا',
++        text: 'عتادك قادر على تشغيل نموذج محلي. تبقى محادثاتك على جهازك ولا تكلف شيئًا.',
++        action: 'إعداد الآن'
++      },
++      'right-pane': {
++        title: 'لوحة العمل',
++        text: 'الملفات والطرفية والمراجعة والمتصفح المدمج تتشارك اللوحة الجانبية.'
++      }
++    }
++  },
++  ui: {
++    search: {
++      clear: 'مسح البحث'
++    },
++    pagination: {
++      label: 'ترقيم الصفحات',
++      previous: 'السابق',
++      previousAria: 'الصفحة السابقة',
++      next: 'التالي',
++      nextAria: 'الصفحة التالية'
++    },
++    sidebar: {
++      title: 'الشريط الجانبي',
++      description: 'تنقل التطبيق',
++      toggle: open => `${open ? 'إظهار' : 'إخفاء'} الشريط الجانبي`
+     }
+   }
+ } satisfies TranslationOverrides
+diff --git a/apps/desktop/src/i18n/en.ts b/apps/desktop/src/i18n/en.ts
+index 16f881735e4d2f61eaff6b3bf597b8c6d4c6fb0f..7c66531de53daf5b2804d90b87430948ee63f9c7 100644
+--- a/apps/desktop/src/i18n/en.ts
++++ b/apps/desktop/src/i18n/en.ts
+@@ -4897,6 +4897,36 @@ export const en: Translations = {
+         runningPrefixedTool: (prefix, action) => `Running ${prefix.toLowerCase()} ${action.toLowerCase()}`,
+         runningTool: action => `Running ${action.toLowerCase()}`
+       },
++      inspector: {
++        previewLimit: (count: number) =>
++          `${count.toLocaleString()} more characters hidden in this preview — open tool details to inspect the available payload.`,
++        open: 'Open tool details',
++        title: 'Tool details',
++        notice:
++          'Snapshot of the payload available when opened. Close and reopen to refresh. Backend-truncated or unsaved data cannot be recovered here.',
++        search: 'Find in section (case-sensitive)',
++        previousMatch: 'Previous match',
++        nextMatch: 'Next match',
++        wrap: 'Wrap lines',
++        copySection: 'Copy section',
++        noMatch: 'No match in this available section.',
++        unavailable: 'No value was received.',
++        empty: 'Empty string',
++        serializationFailed: 'This value could not be serialized.',
++        previousPage: 'Previous page',
++        nextPage: 'Next page',
++        range: (start: number, end: number, total: number) =>
++          `${start.toLocaleString()}–${end.toLocaleString()} / ${total.toLocaleString()}`,
++        sections: {
++          args: 'Arguments',
++          result: 'Result',
++          metadata: 'Metadata',
++          command: 'Command',
++          stdout: 'stdout',
++          stderr: 'stderr',
++          diff: 'Diff'
++        }
++      },
+       titles: {
+         browser_click: { done: 'Clicked page element', pending: 'Clicking page element', pendingAction: 'Clicking' },
+         browser_fill: { done: 'Filled form field', pending: 'Filling form field', pendingAction: 'Filling' },
+diff --git a/apps/desktop/src/i18n/ja.ts b/apps/desktop/src/i18n/ja.ts
+index 0fc16310a06e91363b0b749c77468c4a8cccde38..d9d9df74618f3f6bb1d21b4773639967afc2f28a 100644
+--- a/apps/desktop/src/i18n/ja.ts
++++ b/apps/desktop/src/i18n/ja.ts
+@@ -3563,6 +3563,36 @@ export const jaOverrides = {
+         runningPrefixedTool: (prefix, action) => `${prefix} ${action}を実行中`,
+         runningTool: action => `${action}を実行中`
+       },
++      inspector: {
++        previewLimit: (count: number) =>
++          `プレビューでは残り ${count.toLocaleString()} 文字を省略しています。ツールの詳細で受信済みのデータを確認できます。`,
++        open: 'ツールの詳細を開く',
++        title: 'ツールの詳細',
++        notice:
++          '開いた時点のデータです。更新するには開き直してください。サーバーで省略されたデータや未保存のデータは復元できません。',
++        search: 'セクション内を検索（大文字小文字を区別）',
++        previousMatch: '前の一致',
++        nextMatch: '次の一致',
++        wrap: '行を折り返す',
++        copySection: 'セクションをコピー',
++        noMatch: 'このセクションに一致はありません。',
++        unavailable: '値を受信していません。',
++        empty: '空の文字列',
++        serializationFailed: '値をテキストに変換できませんでした。',
++        previousPage: '前のページ',
++        nextPage: '次のページ',
++        range: (start: number, end: number, total: number) =>
++          `${start.toLocaleString()}–${end.toLocaleString()} / ${total.toLocaleString()}`,
++        sections: {
++          args: '引数',
++          result: '結果',
++          metadata: 'メタデータ',
++          command: 'コマンド',
++          stdout: 'stdout',
++          stderr: 'stderr',
++          diff: '差分'
++        }
++      },
+       titles: {
+         browser_click: {
+           done: 'ページ要素をクリックしました',
+diff --git a/apps/desktop/src/i18n/ru.ts b/apps/desktop/src/i18n/ru.ts
+index 4eff2b5cc1e32f8bc589c8015d2334516d1893dc..2e9fcb8bc8fc6919a185a38a3179f578f3a0396d 100644
+--- a/apps/desktop/src/i18n/ru.ts
++++ b/apps/desktop/src/i18n/ru.ts
+@@ -3796,6 +3796,36 @@ export const ruOverrides = {
+         runningPrefixedTool: (prefix, action) => `Выполняется: ${prefix.toLowerCase()} ${action.toLowerCase()}`,
+         runningTool: action => `Выполняется: ${action.toLowerCase()}`
+       },
++      inspector: {
++        previewLimit: (count: number) =>
++          `Ещё ${count.toLocaleString()} символов скрыто в превью — откройте детали инструмента для просмотра доступных данных.`,
++        open: 'Открыть детали инструмента',
++        title: 'Детали инструмента',
++        notice:
++          'Снимок данных на момент открытия. Для обновления закройте и откройте снова. Обрезанные на сервере или несохранённые данные здесь восстановить нельзя.',
++        search: 'Поиск в разделе (с учётом регистра)',
++        previousMatch: 'Предыдущее совпадение',
++        nextMatch: 'Следующее совпадение',
++        wrap: 'Перенос строк',
++        copySection: 'Копировать раздел',
++        noMatch: 'В доступном разделе совпадений нет.',
++        unavailable: 'Значение не получено.',
++        empty: 'Пустая строка',
++        serializationFailed: 'Не удалось преобразовать значение в текст.',
++        previousPage: 'Предыдущая страница',
++        nextPage: 'Следующая страница',
++        range: (start: number, end: number, total: number) =>
++          `${start.toLocaleString()}–${end.toLocaleString()} / ${total.toLocaleString()}`,
++        sections: {
++          args: 'Аргументы',
++          result: 'Результат',
++          metadata: 'Метаданные',
++          command: 'Команда',
++          stdout: 'stdout',
++          stderr: 'stderr',
++          diff: 'Diff'
++        }
++      },
+       titles: {
+         browser_click: {
+           done: 'Нажат элемент страницы',
+diff --git a/apps/desktop/src/i18n/types.ts b/apps/desktop/src/i18n/types.ts
+index 761866e718436c625f2e34f570e4004bafadc560..4ff89dd414b5242a9c7724a54741c8cfe92e23fd 100644
+--- a/apps/desktop/src/i18n/types.ts
++++ b/apps/desktop/src/i18n/types.ts
+@@ -4189,6 +4189,33 @@ export interface Translations extends NoticeTranslations {
+         runningPrefixedTool: (prefix: string, action: string) => string
+         runningTool: (action: string) => string
+       }
++      inspector: {
++        previewLimit: (count: number) => string
++        open: string
++        title: string
++        notice: string
++        search: string
++        previousMatch: string
++        nextMatch: string
++        wrap: string
++        copySection: string
++        noMatch: string
++        unavailable: string
++        empty: string
++        serializationFailed: string
++        previousPage: string
++        nextPage: string
++        range: (start: number, end: number, total: number) => string
++        sections: {
++          args: string
++          result: string
++          metadata: string
++          command: string
++          stdout: string
++          stderr: string
++          diff: string
++        }
++      }
+       titles: Record<ToolTitleKey, ToolTitleCopy>
+     }
+   }
+diff --git a/apps/desktop/src/i18n/zh-hant.ts b/apps/desktop/src/i18n/zh-hant.ts
+index 27ea112b8441b8b775b0be3f69c05ecbc2fa420f..b52f4ccfdbc2d485ac27e64d26195878e5a3ee65 100644
+--- a/apps/desktop/src/i18n/zh-hant.ts
++++ b/apps/desktop/src/i18n/zh-hant.ts
+@@ -137,20 +137,1102 @@ export const zhHantOverrides = {
+       description: '面向開發者。終端機、檔案、差異、狀態列和版面配置，按你的設定顯示。'
+     }
+   },
+-  zones: zhHantChrome.zones,
+-  contextMenu: zhHantChrome.contextMenu,
+-  assistant: zhHantAssistant.assistant,
+-  prompts: zhHantChat.prompts,
+-  desktop: zhHantChat.desktop,
+-  errors: zhHantDiagnostics.errors,
+-  tips: zhHantChat.tips,
+-  ui: zhHantCommon.ui,
+-  freeTier: {
+-    offer: {
+-      heading: '繼續使用 Hermes',
+-      body: '你正在使用免費額度。繼續使用 Hermes 的話，你會開始遇到限制。登入免費的 Nous 帳戶，即可獲得更多額度。',
+-      signIn: '登入',
+-      notNow: '暫不'
++
++  statusStack: {
++    agents: '代理',
++    background: count => `${count} 個背景任務`,
++    goalActive: '目標進行中',
++    goalBlocked: '目標受阻',
++    goalDone: '目標已完成',
++    goalPaused: '目標已暫停',
++    goalWaiting: '目標等待中',
++    subagents: count => `${count} 個子代理`,
++    todos: (done, total) => `任務 ${done}/${total}`,
++    running: '執行中',
++    stop: '停止',
++    dismiss: '關閉',
++    exit: code => `結束碼 ${code}`,
++    control: {
++      goalActiveTurns: (turn, maxTurns) => `第 ${turn}/${maxTurns} 輪`,
++      goalDoneTurns: turns => `共 ${turns} 輪`,
++      goalTurn: turn => `第 ${turn} 輪`,
++      goalActions: '目標操作',
++      viewDetails: '檢視詳細資訊',
++      addCriterion: '新增條件',
++      addCriterionDialogTitle: '新增條件',
++      addCriterionPlaceholder: '輸入條件內容...',
++      criterionLabel: '條件',
++      pauseGoal: '暫停目標',
++      resumeGoal: '繼續目標',
++      resumeNow: '立即繼續',
++      clearGoal: '清除目標',
++      clearGoalConfirmTitle: '清除目標？',
++      clearGoalConfirmBody: '確定要清除目前活躍的目標嗎？此動作無法復原。',
++      copyCriterion: index => `複製條件 ${index}`,
++      removeCriterion: index => `移除條件 ${index}`,
++      removeCriterionConfirmTitle: index => `移除條件 ${index}？`,
++      removeCriterionConfirmBody: index => `確定要移除條件 ${index} 嗎？`,
++      clearCriteria: '清除全部條件',
++      clearCriteriaConfirmTitle: '清除全部條件？',
++      clearCriteriaConfirmBody: '確定要移除此目標下的所有條件嗎？',
++      criteriaHeader: count => `條件 · ${count}`,
++      noCriteria: '無條件',
++      goalDetailsTitle: '目標詳細資訊',
++      objectiveLabel: '目標內容',
++      contractOutcome: '預期成果',
++      contractVerification: '驗證方式',
++      contractConstraints: '限制條件',
++      contractBoundaries: '邊界',
++      contractStopWhen: '停止條件',
++      waitBarrierTitle: '等待條件',
++      waitUntil: target => `等待至 ${target}`,
++      waitSession: target => `等待工作階段 ${target}`,
++      waitPid: pid => `等待處理程序 ${pid}`,
++      qualityGatesTitle: '品質關卡',
++      gateCommand: '命令',
++      gateAttempts: (attempts, max) => `嘗試 ${attempts}/${max}`,
++      gateTimeout: seconds => `逾時 ${seconds} 秒`,
++      gateLastExit: code => (code === null ? '擱置中' : `結束代碼: ${code}`),
++      loopActive: '循環進行中',
++      loopPaused: '循環已暫停',
++      loopDeferred: '循環已延後',
++      loopFinished: '循環已完成',
++      loopRuns: runs => `執行 ${runs} 次`,
++      loopRunCount: (current, total) => `執行 ${current}/${total}`,
++      loopNext: time => `下次 ${time}`,
++      loopEverySeconds: seconds => `每 ${seconds} 秒`,
++      loopEveryMinutes: minutes => `每 ${minutes} 分鐘`,
++      loopEveryHours: hours => `每 ${hours} 小時`,
++      loopSelfPaced: '自訂步調',
++      loopActions: '循環操作',
++      pauseLoop: '暫停循環',
++      resumeLoop: '繼續循環',
++      stopLoop: '停止循環',
++      stopLoopConfirmTitle: '停止循環？',
++      stopLoopConfirmBody: '確定要停止此循環嗎？',
++      dismissLoop: '關閉循環',
++      loopPromptLabel: '提示詞',
++      loopCadenceLabel: '頻率',
++      loopUntilLabel: '截止條件',
++      loopDeferredNotice: '目前由進行中的目標控制工作階段。',
++      loopAwaitingResponse: '等待回應中',
++      heartbeatActive: '活動訊號進行中',
++      heartbeatPaused: '活動訊號已暫停',
++      heartbeatEveryMinutes: minutes => `每 ${minutes} 分鐘`,
++      heartbeatEveryHours: hours => `每 ${hours} 小時`,
++      heartbeatEverySeconds: seconds => `每 ${seconds} 秒`,
++      heartbeatNext: time => `下次 ${time}`,
++      heartbeatDueWaitingForIdle: '已到期 — 等待會話閒置',
++      heartbeatActions: '活動訊號操作',
++      pauseHeartbeat: '暫停活動訊號',
++      resumeHeartbeat: '繼續活動訊號',
++      clearHeartbeat: '清除活動訊號',
++      clearHeartbeatConfirmTitle: '清除活動訊號？',
++      clearHeartbeatConfirmBody: '確定要清除此活動訊號嗎？',
++      heartbeatFiredCount: count => `已觸發 ${count} 次`,
++      actionFailed: msg => `操作失敗: ${msg}`,
++      actionSucceeded: '操作成功',
++      copySuccess: '已將條件複製到剪貼板',
++      copyFailure: '複製條件到剪貼板失敗',
++      continuationFailed: '提交目標延續內容失敗',
++      continuationQueued: '目標已恢復 — 延續內容已排隊，將在目前回合結束後送出',
++      continuationBusy: '目標已恢復 — 會話忙碌中，請 /interrupt 目前回合以繼續',
++      controlUnavailable: msg => `會話控制無法使用: ${msg}`,
++      dismissError: '關閉錯誤',
++      add: '新增'
++    },
++    coding: {
++      title: '工作區',
++      noBranch: '無分支',
++      detached: '分離 HEAD',
++      clean: '乾淨',
++      changed: count => `${count} 處變更`,
++      ahead: count => `領先 ${count}`,
++      behind: count => `落後 ${count}`,
++      review: '審查',
++      close: '關閉',
++      openChanges: '開啟變更',
++      openFile: '開啟檔案',
++      stage: '暫存',
++      unstage: '取消暫存',
++      stageAll: '全部暫存',
++      viewAsTree: '樹狀檢視',
++      viewAsList: '清單檢視',
++      revert: '還原',
++      revertAll: '全部還原',
++      revertConfirm: '捨棄對此檔案的變更並將其還原至已提交狀態？此操作無法復原。',
++      revertAllConfirm: '捨棄所有變更並將檔案還原至已提交狀態？此操作無法復原。',
++      staged: '已暫存',
++      noChanges: '沒有變更',
++      notRepo: '不是 Git 儲存庫',
++      noDiff: '沒有可顯示的差異',
++      scopeUncommitted: '未提交',
++      scopeBranch: '分支',
++      scopeLastTurn: '上一輪',
++      commit: '提交',
++      commitAndPush: '提交並推送',
++      commitPlaceholder: shortcut => `訊息（${shortcut} 提交）`,
++      generateCommitMessage: '產生提交訊息',
++      stopGenerating: '停止產生',
++      createPr: '建立 PR',
++      openPr: '開啟 PR',
++      ghMissing: '安裝 GitHub CLI (gh) 並登入後可開啟 PR',
++      agentShip: '讓 Hermes 提交並開 PR',
++      agentShipUnavailable: '擁有這些變更的對話目前不在畫面上。',
++      agentShipPrompt: '檢查目前的變更，使用清晰的約定式提交訊息提交，推送分支，並開啟一個拉取請求。',
++      newBranch: '新增分支',
++      branchOffFrom: base => `從 ${base} 建立新分支`,
++      switchTo: branch => `切換到 ${branch}`,
++      switchFailed: branch => `無法切換到 ${branch}`,
++      worktrees: '工作樹'
++    }
++  },
++
++  updates: {
++    stages: {
++      idle: '準備中…',
++      prepare: '準備中…',
++      fetch: '下載中…',
++      pull: '快完成了…',
++      pydeps: '收尾中…',
++      update: '正在更新 Hermes…',
++      rebuild: '正在重新建置桌面應用程式…',
++      restart: '正在重新啟動 Hermes…',
++      done: '更新完成',
++      manual: '從終端機更新',
++      guiSkew: '請更新桌面應用程式',
++      error: '更新已暫停'
++    },
++    checking: '正在檢查更新…',
++    checkFailedTitle: '無法檢查更新',
++    tryAgain: '重試',
++    notAvailableTitle: '更新不可用',
++    unsupportedMessage: '此版本的 Hermes 無法在應用程式內自行更新。',
++    connectionRetry: '請檢查網路連線後重試。',
++    latestBody: '您正在執行最新版本。',
++    latestBodyBackend: '後端正在執行最新版本。',
++    allSetTitle: '已是最新版本',
++    availableTitle: '有可用更新',
++    availableBody: '新版 Hermes 已可安裝。',
++    availableTitleBackend: '後端有可用更新',
++    availableBodyBackend: '已連接的 Hermes 後端有新版本可安裝。',
++    availableBodyNoChangelog: '已有新版本可用。此安裝方式無法顯示更新日誌。',
++    updateNow: '立即更新',
++    maybeLater: '稍後再說',
++    moreChanges: count => `另有 ${count} 項變更。`,
++    manualTitle: '從終端機更新',
++    manualBody: '您是從命令列安裝的 Hermes，因此更新也需要在那裡執行。請將此指令貼到終端機：',
++    manualPickedUp: '下次啟動 Hermes 時會使用新版本。',
++    guiSkewTitle: '請更新桌面應用程式',
++    guiSkewBody:
++      '後端已更新，但此桌面應用程式套件未變更。請更新或重新安裝 Hermes 桌面應用程式（你的 AppImage / .deb / .rpm）以保持一致。',
++    copy: '複製',
++    copied: '已複製',
++    done: '完成',
++    applyingBody:
++      'Hermes 更新程式會在自己的視窗中接管，並在完成後自動重新開啟 Hermes。更新期間請勿自行重新開啟 Hermes。',
++    applyingBodyBackend: '遠端後端正在套用更新並將重新啟動。恢復後 Hermes 會自動重新連線。',
++    applyingClose: '此視窗會在更新期間關閉，隨後 Hermes 會自動重新開啟。',
++    errorTitle: '更新未完成',
++    errorBody: '沒有資料遺失。您可以現在重試。',
++    blockerTitle: '關閉本機預覽以更新 Hermes？',
++    blockerBody: 'Hermes 需要在更新前停止這些本機預覽。這不會修改或刪除您的檔案。',
++    foreignBlockerTitle: '關閉其他處理程序以更新 Hermes',
++    foreignBlockerBody:
++      'Hermes 無法安全地自動關閉這些處理程序。請關閉擁有這些處理程序的應用程式、終端機或服務，然後重試更新。',
++    mixedBlockerBody: 'Hermes 可以關閉下方列出的本機預覽。其他處理程序必須手動關閉，更新才能繼續。',
++    closePreviewsAndUpdate: '關閉預覽並更新',
++    closePreviewsAndCheckAgain: '關閉預覽並重新檢查',
++    localPreview: '本機預覽',
++    portLabel: port => `連接埠 ${port}`,
++    pidLabel: pid => `PID ${pid}`,
++    technicalDetails: '技術詳細資料',
++    notNow: '暫不',
++    clientAlsoBehindTitle: '桌面應用版本落後',
++    clientAlsoBehindMessage: '後端已是最新，但此桌面應用仍是舊版本。請更新以取得最新修復。',
++    clientAlsoBehindAction: '更新桌面應用',
++    everythingDispatched: '更新已派送',
++    everythingSkipped: '已略過',
++    everythingRowFailed: '更新失敗',
++    everythingFanoutFailedTitle: '無法更新其他執行個體',
++    applyStatus: {
++      preparing: '正在更新後端…',
++      pulling: '後端更新中…',
++      restarting: '後端正在重新啟動以載入更新…',
++      notAvailable: '此後端無法更新。',
++      failed: '後端更新失敗。',
++      noReturn: '後端未恢復連線。更新可能未完成——請檢查後端主機。'
++    }
++  },
++
++  install: {
++    stageStates: {
++      pending: '等待中',
++      running: '安裝中',
++      succeeded: '完成',
++      skipped: '已略過',
++      failed: '失敗'
++    },
++    oneTimeTitle: 'Hermes 需要一次性安裝',
++    unsupportedDesc: platform =>
++      `${platform} 暫不支援自動首次啟動安裝。請開啟終端機並執行下面的指令，然後重新啟動此應用程式。之後啟動會略過此步驟。`,
++    installCommand: '安裝指令',
++    copyCommand: '複製指令',
++    viewDocs: '檢視安裝文件',
++    installTo: '將安裝至',
++    retryAfterRun: '我已執行 -- 重試',
++    setupChoiceTitle: '設定 Hermes Desktop',
++    setupChoiceDesc: '將此應用程式連線到您已執行的 Hermes 閘道，或在這台電腦上本機安裝 Hermes。',
++    connectExistingTitle: '連線到現有 Hermes',
++    connectExistingShort: '連線現有環境',
++    connectExistingDesc: '使用工作階段權杖或瀏覽器登入連線遠端後端。不會啟動本機安裝。',
++    installLocalTitle: '本機安裝 Hermes',
++    installLocalDesc: '下載 Hermes、建立 Python 環境，並在這台電腦上執行後端。',
++    localStartUnavailable: '無法啟動本機安裝。請重新啟動 Hermes Desktop 後再試一次。',
++    remoteSetupTitle: '連線到現有 Hermes',
++    remoteSetupDesc: '輸入閘道 URL。Hermes Desktop 會偵測需要權杖還是瀏覽器登入。',
++    remoteUrlTitle: '閘道 URL',
++    remoteUrlDesc: '使用 Hermes 閘道的基礎 URL；遠端位址請包含 https://。',
++    remoteUrlPlaceholder: 'https://gateway.example.com/hermes',
++    probing: '正在偵測閘道驗證方式...',
++    probeError: '無法連線到該 Hermes 閘道。',
++    identityProvider: '您的身分提供者',
++    authTitle: '驗證',
++    authNeedsOauth: provider => `測試此閘道前請先使用 ${provider} 登入。`,
++    authSignedIn: '瀏覽器登入已完成。',
++    connected: '已連線',
++    signIn: '登入',
++    signInWith: provider => `使用 ${provider} 登入`,
++    enterUrlFirst: '請先輸入閘道 URL。',
++    signInIncomplete: '驗證完成前登入視窗已關閉。',
++    tokenTitle: '工作階段權杖',
++    tokenDesc: '貼上遠端閘道 .env 檔案中的工作階段權杖。',
++    pasteSessionToken: '貼上工作階段權杖',
++    incompleteSignInTest: '測試此受 OAuth 保護的閘道前請先登入。',
++    incompleteTokenTest: '測試此閘道前請輸入工作階段權杖。',
++    testConnection: '測試連線',
++    testSucceeded: (baseUrl, version) => `已連線到 ${baseUrl}${version ? ` (${version})` : ''}。`,
++    applyRemote: '套用並重新連線',
++    backToSetup: '返回',
++    failedTitle: '安裝失敗',
++    settingUpTitle: '正在設定 Hermes Agent',
++    finishingTitle: '正在收尾',
++    failedDesc:
++      '某個安裝步驟失敗。在 Windows 上，如果另一個 Hermes CLI 或桌面執行個體正在執行，可能會出現這種情況。請停止正在執行的 Hermes 執行個體後重試。可查看下方的詳細資訊或 desktop 記錄中的完整記錄。',
++    activeDesc: '這是一次性設定。Hermes 安裝程式正在下載相依套件並設定您的電腦。之後啟動會略過此步驟。',
++    progress: (completed, total) => `${completed}/${total} 個步驟已完成`,
++    currentStage: stage => ` -- 目前：${stage}`,
++    fetchingManifest: '正在取得安裝程式 manifest...',
++    error: '錯誤',
++    hideOutput: '隱藏安裝程式輸出',
++    showOutput: '顯示安裝程式輸出',
++    lines: count => `${count} 行`,
++    noOutput: '暫無輸出。',
++    cancelling: '取消中...',
++    cancelInstall: '取消安裝',
++    transcriptSaved: '完整記錄已儲存至',
++    copiedOutput: '已複製！',
++    copyOutput: '複製輸出',
++    reloadRetry: '重新載入並重試'
++  },
++
++  onboarding: {
++    headerTitle: '開始設定 Hermes Agent',
++    headerDesc: '連線模型提供方即可開始聊天。大多數選項只需一次點擊。',
++    preparingInstall: 'Hermes 正在完成安裝。首次執行通常不到一分鐘。',
++    starting: '正在啟動 Hermes…',
++    lookingUpProviders: '正在查詢提供方...',
++    collapse: '收合',
++    otherProviders: '其他提供方',
++    haveApiKey: '我有 API 金鑰',
++    chooseLater: '稍後再選擇提供方',
++    recommended: '建議',
++    connected: '已連線',
++    featuredPitch: '一個訂閱，300+ 前沿模型 — 執行 Hermes 的建議方式',
++    fireworksPitch: '直接模型 API — Fireworks 託管的前沿模型',
++    localModelsTitle: '本地執行模型',
++    localModelsPitch: '無需帳號——下載模型，在本機執行',
++    openRouterPitch: '一個金鑰，數百個模型 — 穩定的預設選擇',
++    apiKeyOptions: {
++      fireworks: { short: '直接模型 API', description: '直接存取 Fireworks AI 託管的模型。' },
++      openrouter: { short: '一個金鑰，多個模型', description: '用一個金鑰存取數百個模型。適合新安裝的預設選擇。' },
++      openai: { short: 'GPT 等級模型', description: '直接存取 OpenAI 模型。' },
++      gemini: { short: 'Gemini 模型', description: '直接存取 Google Gemini 模型。' },
++      xai: { short: 'Grok 模型', description: '直接存取 xAI Grok 模型。' },
++      local: {
++        short: '自託管',
++        description: '將 Hermes 指向本機或自託管的 OpenAI 相容端點（vLLM、llama.cpp、Ollama 等）。'
++      }
++    },
++    backToSignIn: '返回登入',
++    getKey: '取得金鑰',
++    replaceCurrent: '取代目前值',
++    pasteApiKey: '貼上 API 金鑰',
++    couldNotSave: '無法儲存憑證。',
++    connecting: '連線中',
++    update: '更新',
++    flowSubtitles: {
++      pkce: '開啟瀏覽器登入，然後回到這裡繼續',
++      device_code: '在瀏覽器中開啟驗證頁面 — Hermes 會自動連線',
++      external: '先在終端機登入一次，然後回來繼續聊天'
++    },
++    startingSignIn: provider => `正在為 ${provider} 啟動登入...`,
++    verifyingCode: provider => `正在透過 ${provider} 驗證您的代碼...`,
++    connectedProvider: provider => `${provider} 已連線`,
++    connectedPicking: provider => `${provider} 已連線。正在選擇預設模型...`,
++    signInFailed: '登入失敗，請重試。',
++    signInExpired:
++      '等待授權逾時。通常是因為登入頁面在開啟的分頁中卡住（伺服器端問題）——請在該頁面完成登入後重試。若仍失敗，請改用 API 金鑰或 CLI 方式。',
++    pickDifferentProvider: '選擇其他提供方',
++    signInWith: provider => `使用 ${provider} 登入`,
++    openedBrowser: provider => `已在瀏覽器中開啟 ${provider}。`,
++    authorizeThere: '請在那裡授權 Hermes。',
++    copyAuthCode: '複製授權碼並貼到下方。',
++    pasteAuthCode: '貼上授權碼',
++    reopenAuthPage: '重新開啟授權頁面',
++    autoBrowser: provider => `已在瀏覽器中開啟 ${provider}。請在那裡授權 Hermes，連線會自動完成，無需複製或貼上。`,
++    reopenSignInPage: '重新開啟登入頁面',
++    waitingAuthorize: '等待您授權...',
++    externalPending: provider => `${provider} 透過自己的 CLI 登入。請在終端機執行此指令，然後回來選擇「我已登入」：`,
++    signedIn: '我已登入',
++    deviceCodeOpened: provider => `已在瀏覽器中開啟 ${provider}。請在那裡輸入此代碼：`,
++    reopenVerification: '重新開啟驗證頁面',
++    copy: '複製',
++    defaultModel: '預設模型',
++    freeTier: '免費層',
++    pro: 'Pro',
++    free: '免費',
++    price: (input, output) => `${input} 輸入 / ${output} 輸出 每 Mtok`,
++    change: '變更',
++    startChatting: '開始',
++    docs: provider => `${provider} 文件`
++  },
++
++  modelPicker: {
++    title: '切換模型',
++    current: '目前：',
++    unknown: '（未知）',
++    search: '篩選提供方和模型...',
++    noModels: '找不到模型。',
++    addProvider: '新增提供方',
++    loadFailed: '無法載入模型',
++    downloading: '下載中',
++    localDownloadsHeading: '本地',
++    noAuthenticatedProviders: '沒有已驗證的提供方。',
++    pro: 'Pro',
++    proNeedsSubscription: 'Pro 模型需要付費 Nous 訂閱。',
++    free: '免費',
++    freeTier: '免費層',
++    priceTitle: '每百萬 Token 的輸入/輸出價格',
++    wasPrice: '原價'
++  },
++
++  modelVisibility: {
++    title: '模型',
++    search: '搜尋模型',
++    noAuthenticatedProviders: '沒有已驗證的提供方。',
++    addProvider: '新增提供方…'
++  },
++
++  shell: {
++    windowControls: '視窗控制項',
++    paneControls: '窗格控制項',
++    appControls: '應用程式控制項',
++    modelMenu: {
++      search: '搜尋模型',
++      noModels: '找不到模型',
++      editModels: '編輯模型…',
++      refreshModels: '重新整理模型',
++      fast: '快速'
++    },
++    modelOptions: {
++      noOptions: '此模型沒有可用選項',
++      options: '選項',
++      thinking: '思考',
++      fast: '快速',
++      effort: '推理強度',
++      minimal: '最小',
++      low: '低',
++      medium: '中',
++      high: '高',
++      xhigh: '極高',
++      max: '最高',
++      ultra: '超高',
++      updateFailed: '模型選項更新失敗',
++      fastFailed: '快速模式更新失敗'
++    },
++    gatewayMenu: {
++      gateway: '閘道',
++      connected: '已連線',
++      connecting: '連線中',
++      offline: '離線',
++      inferenceReady: '推論已就緒',
++      inferenceNotReady: '推論未就緒',
++      checkingInference: '正在檢查推論',
++      disconnected: '已中斷連線',
++      reconnectGateway: '重新連線閘道',
++      openSystem: '開啟系統面板',
++      connection: label => `連線：${label}`,
++      recentActivity: '最近活動',
++      viewAllLogs: '查看全部記錄 →',
++      messagingPlatforms: '訊息平台'
++    },
++    approvalMode: {
++      title: '核准模式',
++      ariaLabel: mode => `核准模式：${mode}`,
++      manual: '手動',
++      manualDescription: '執行需要核准的操作前詢問',
++      smart: '智慧',
++      smartDescription: '自動評估操作，並在需要時詢問',
++      off: '關閉',
++      offDescription: '不顯示核准提示，直接執行'
++    },
++    statusbar: {
++      unknown: '未知',
++      restart: '重新啟動',
++      update: '更新',
++      updateInProgress: '更新中',
++      commitsBehind: (count, branch) => `落後 ${branch} ${count} 個提交`,
++      desktopVersion: version => `Hermes Desktop v${version}`,
++      backendVersion: version => `後端 v${version}`,
++      clientLabel: version => `用戶端 v${version}`,
++      connectionSsh: host => `SSH: ${host}`,
++      connectionRemote: host => `遠端: ${host}`,
++      connectionCloud: host => `雲端: ${host}`,
++      connectionCloudTooltip: host => `Hermes Cloud · ${host}`,
++      connectionSshTooltip: host => `SSH · ${host}`,
++      connectionRemoteTooltip: host => `Remote · ${host}`,
++      backendLabel: version => `後端 v${version}`,
++      commit: sha => `提交 ${sha}`,
++      branch: branch => `分支 ${branch}`,
++      closeCommandCenter: '關閉命令中心',
++      openCommandCenter: '開啟命令中心',
++      showTerminal: '顯示終端機',
++      hideTerminal: '隱藏終端機',
++      gateway: '閘道',
++      gatewayReady: '就緒',
++      gatewayNeedsSetup: '需要設定',
++      gatewayUnavailable: '推論不可用',
++      gatewayChecking: '檢查中',
++      gatewayConnecting: '連線中',
++      gatewayOffline: '離線',
++      gatewayRestarting: '重新啟動中…',
++      gatewayTitle: '閘道',
++      agents: '代理',
++      closeAgents: '關閉代理',
++      openAgents: '開啟代理',
++      subagents: count => `${count} 個子代理`,
++      failed: count => `${count} 個失敗`,
++      running: count => `${count} 個執行中`,
++      cron: '排程',
++      openCron: '開啟排程工作',
++      starmap: '記憶圖譜',
++      openStarmap: '開啟記憶圖譜',
++      turnRunning: '執行中',
++      contextUsage: '上下文使用量',
++      systemResources: {
++        title: '系統資源',
++        loading: '資源…',
++        gpuUtilization: 'GPU 使用率',
++        gpuMemory: '顯示記憶體',
++        ram: '記憶體',
++        unifiedNote: '統一記憶體——GPU 與系統共享此記憶體池。',
++        toggle: '系統資源'
++      },
++      contextUsagePanel: {
++        categories: {
++          conversation: '對話',
++          mcp: 'MCP',
++          memory: '記憶',
++          rules: '規則',
++          skills: '技能',
++          subagent_definitions: '子代理定義',
++          system_prompt: '系統提示詞',
++          tool_definitions: '工具定義'
++        },
++        empty: '尚無上下文資料',
++        loading: '正在載入明細…',
++        percentFull: percent => `已用 ${percent}%`,
++        title: '上下文使用量',
++        tokenSummary: (used, max) => `${used} / ${max} Tokens`
++      },
++      session: '工作階段',
++      yoloOn: 'YOLO 已開啟 — 自動核准危險指令。Shift+點擊可全域切換。',
++      yoloOff: 'YOLO 已關閉。Shift+點擊可全域切換。',
++      modelNone: '無',
++      noModel: '無模型',
++      switchModel: '切換模型',
++      openModelPicker: '開啟模型選擇器',
++      modelPinned: '已由你固定；新對話將使用此模型而非「設定」中的預設模型',
++      modelTitle: (provider, model) => `模型 · ${provider}：${model}`,
++      providerModelTitle: (provider, model) => `${provider} · ${model}`
++    }
++  },
++
++  rightSidebar: {
++    aria: '右側邊欄',
++    panelsAria: '右側邊欄面板',
++    files: '檔案系統',
++    terminal: '終端機',
++    noFolderSelected: '未選擇資料夾',
++    changeCwdTitle: '變更工作目錄',
++    remotePickerTitle: '選擇遠端資料夾',
++    remotePickerDescription: '瀏覽已連線後端上的資料夾。',
++    remotePickerSelect: '選擇資料夾',
++    folderTip: cwd => cwd,
++    openFolder: '開啟資料夾',
++    refreshTree: '重新整理檔案樹',
++    collapseAll: '收合所有資料夾',
++    previewUnavailable: '預覽不可用',
++    couldNotPreview: path => `無法預覽 ${path}`,
++    noProjectTitle: '沒有專案',
++    noProjectBody: '開啟一個專案以瀏覽檔案並檢視變更。',
++    noProjectOpen: '未開啟專案',
++    noDiffs: '無差異',
++    unreadableTitle: '無法讀取',
++    unreadableBody: error => `無法讀取此資料夾 (${error})。`,
++    emptyTitle: '空資料夾',
++    emptyBody: '此資料夾是空的。',
++    treeErrorTitle: '檔案樹錯誤',
++    treeErrorBody: '檔案樹在渲染此資料夾時發生錯誤。',
++    tryAgain: '重試',
++    loadingTree: '正在載入檔案樹',
++    loadingFiles: '正在載入檔案',
++    terminalHide: '隱藏終端機',
++    terminalsAria: '終端機',
++    terminalNew: '新增終端機',
++    terminalCloseOthers: '關閉其他',
++    terminalCloseAll: '全部關閉',
++    addToChat: '新增至聊天'
++  },
++
++  preview: {
++    tab: '預覽',
++    closePane: '關閉預覽窗格',
++    loading: '正在載入預覽',
++    unavailable: '預覽不可用',
++    opening: '開啟中...',
++    hide: '隱藏',
++    openPreview: '開啟預覽',
++    openInBrowser: '在瀏覽器中開啟',
++    openInExternal: '在外部開啟',
++    popIn: '彈回',
++    popOut: '彈出',
++    linkHint: '⌘/Ctrl+點擊在預覽窗格開啟',
++    sourceLineTitle: '點擊選取 · shift 點擊擴展 · 拖曳至輸入框',
++    source: '原始碼',
++    renderedPreview: '預覽',
++    diff: '差異',
++    unknownSize: '大小未知',
++    binaryTitle: '這看起來像二進位檔案',
++    binaryBody: label => `預覽 ${label} 可能會顯示無法讀取的文字。`,
++    largeTitle: '此檔案較大',
++    largeBody: (label, size) => `${label} 大小為 ${size}。Hermes 只會顯示前 512 KB。`,
++    previewAnyway: '仍然預覽',
++    truncated: '顯示前 512 KB。',
++    noInlineTitle: '沒有行內預覽',
++    noInlineBody: mimeType => `${mimeType || '此檔案類型'} 仍可作為脈絡附件。`,
++    edit: '編輯',
++    editing: '編輯中',
++    unsavedChanges: '未儲存的變更',
++    saveFailed: message => `無法儲存：${message}`,
++    diskChangedTitle: '檔案已在磁碟上變更',
++    diskChangedBody: '此檔案自開啟以來已變更。用你的版本覆寫，還是放棄你的編輯並重新載入？',
++    overwrite: '覆寫',
++    discardReload: '放棄並重新載入',
++    console: {
++      deselect: '取消選取項目',
++      select: '選取項目',
++      copyFailed: '無法複製主控台輸出',
++      copyEntry: '複製此項目',
++      sendEntry: '將此項目傳送至聊天',
++      messages: count => `${count} 則主控台訊息`,
++      resize: '調整預覽主控台大小',
++      title: '預覽主控台',
++      selected: count => `已選取 ${count} 個`,
++      sendToChat: '傳送至聊天',
++      copySelected: '複製所選至剪貼簿',
++      copyAll: '全部複製至剪貼簿',
++      copy: '複製',
++      clear: '清除',
++      empty: '暫無主控台訊息。',
++      promptHeader: '預覽主控台：',
++      sentTitle: '已傳送至聊天',
++      sentMessage: count => `已將 ${count} 條記錄新增至輸入框`
++    },
++    web: {
++      appFailedToBoot: '預覽應用程式啟動失敗',
++      serverNotFound: '找不到伺服器',
++      remoteLoopback:
++        '這個位址指向執行代理的那台機器，而不是本機。瀏覽器窗格會在本機載入頁面，因此遠端開發伺服器需要連接埠轉送或可連線的主機名稱。',
++      failedToLoad: '預覽載入失敗',
++      tryAgain: '重試',
++      restarting: 'Hermes 正在重新啟動...',
++      askRestart: '請 Hermes 重新啟動伺服器',
++      lookingRestart: taskId => `Hermes 正在尋找要重新啟動的預覽伺服器 (${taskId})`,
++      restartingTitle: '正在重新啟動預覽伺服器',
++      restartingMessage: 'Hermes 正在背景執行。可在預覽主控台查看進度。',
++      startRestartFailed: message => `無法啟動伺服器重新啟動：${message}`,
++      restartFailed: '伺服器重新啟動失敗',
++      hideConsole: '隱藏預覽主控台',
++      showConsole: '顯示預覽主控台',
++      hideDevTools: '隱藏預覽 DevTools',
++      openDevTools: '開啟預覽 DevTools',
++      goBack: '上一頁',
++      goForward: '下一頁',
++      reload: '重新載入頁面',
++      address: '網址',
++      addressPlaceholder: '輸入網址',
++      blankPageBody: '在上方輸入網址開始瀏覽，或請 Hermes 開啟頁面。',
++      finishedRestarting: message => `Hermes 已完成預覽伺服器重新啟動${message ? `：${message}` : ''}`,
++      failedRestarting: message => `伺服器重新啟動失敗：${message}`,
++      unknownError: '未知錯誤',
++      restartedTitle: '預覽伺服器已重新啟動',
++      reloadingNow: '正在重新載入預覽。',
++      restartFailedTitle: '預覽重新啟動失敗',
++      restartFailedMessage: 'Hermes 無法重新啟動伺服器。',
++      stillWorking: 'Hermes 仍在執行，但尚未收到重新啟動結果。伺服器指令可能正在前台執行。',
++      workspaceReloading: '工作區已變更，正在重新載入預覽',
++      fileChanged: url => `檔案已變更，正在重新載入預覽：${url}`,
++      filesChanged: (count, url) => `${count} 個檔案變更，正在重新載入預覽：${url}`,
++      watchFailed: message => `無法監看預覽檔案：${message}`,
++      moduleMimeDescription:
++        '模組指令碼使用了錯誤的 MIME 類型。這通常表示靜態檔案伺服器正在服務 Vite/React 應用程式，而不是專案開發伺服器。',
++      loadFailedConsole: (code, message) => `載入失敗${code ? ` (${code})` : ''}：${message}`,
++      unreachableDescription: '無法連線至預覽頁面。',
++      openTarget: url => `開啟 ${url}`,
++      fallbackTitle: '預覽'
++    }
++  },
++
++  zones: {
++    showTabStrip: '顯示分頁',
++    hideTabStrip: '隱藏分頁',
++    showStripTab: title => `顯示 ${title}`,
++    hideStripTab: title => `隱藏 ${title}`,
++    lastTabKeptTitle: '保留最後一個分頁',
++    lastTabKeptBody: '此區域至少需要一個可見分頁。請先顯示另一個分頁，或收合整個側邊欄。',
++    toggleStripTab: title => `切換 ${title} 分頁`,
++    minimize: '最小化',
++    restore: '還原',
++    reload: '重新載入',
++    closeOthers: '關閉其他',
++    closeToRight: '關閉右側',
++    closeAll: '全部關閉',
++    newSessionTab: '新增工作階段分頁',
++    newTab: '新增分頁',
++    pluginDisabled: pluginId => `外掛「${pluginId}」已停用`,
++    pluginDisabledBody: '在 技能與工具 → 外掛 中重新啟用即可恢復面板。',
++    missingPane: paneId => `缺少面板：${paneId}`,
++    editTitle: '版面配置',
++    editHint: '選擇一個版面配置，或在區域之間拖曳面板。',
++    reset: '重設',
++    templates: '範本',
++    custom: '自訂',
++    newGridLayout: '新增網格版面',
++    saveCurrentAs: '將目前排列儲存為範本',
++    nameLayoutPlaceholder: '為版面命名…',
++    deletePreset: name => `刪除 ${name}`,
++    zoneEditorTitle: '區域編輯器',
++    editorHintPre: '點擊分割 · ',
++    editorHintPost: ' 翻轉分割線 · 拖曳跨越多個區域可合併 · 拖曳共用邊可調整大小',
++    templateColumns: '欄',
++    templateRows: '列',
++    templateGrid: '網格',
++    templatePriority: '優先',
++    zoneTag: index => `區域 ${index}`,
++    mergeZones: count => `合併 ${count} 個區域`,
++    customZoneName: count => `自訂 ${count} 區`,
++    layoutNamePlaceholder: fallback => `版面名稱（${fallback}）`,
++    saveApply: '儲存並套用',
++    notExpressible: '此排列互相咬合（風車形）——暫時無法表示為巢狀分割',
++    zoneCount: count => `${count} 個區域`,
++    tabCount: count => `${count} 個分頁`
++  },
++
++  contextMenu: {
++    link: {
++      openInApp: '在應用程式內瀏覽器中開啟',
++      openExternal: '在外部瀏覽器中開啟',
++      copyUrl: '複製 URL',
++      copyResolvedUrl: '複製解析後的 URL'
++    },
++    image: {
++      copyImage: '複製圖片',
++      copyImageAddress: '複製圖片位址',
++      saveImageAs: '圖片另存為…'
++    },
++    edit: {
++      cut: '剪下',
++      paste: '貼上',
++      selectAll: '全選',
++      addToDictionary: '新增至字典'
++    },
++    page: {
++      copyPageUrl: '複製頁面 URL',
++      inspectElement: '檢查元素'
++    }
++  },
++
++  assistant: {
++    thread: {
++      loadingSession: '正在載入工作階段',
++      showEarlier: '顯示較早的訊息',
++      loadingResponse: 'Hermes 正在載入回覆',
++      resumeWhenBackgroundDone: count =>
++        count === 1 ? '背景工作完成後將自動繼續' : `${count} 個背景工作完成後將自動繼續`,
++      thinking: '思考中',
++      thought: '已思考',
++      thoughtBriefly: '思考了片刻',
++      thoughtFor: duration => `思考了 ${duration}`,
++      turnDuration: duration => `本輪耗時 ${duration}`,
++      today: time => `今天，${time}`,
++      yesterday: time => `昨天，${time}`,
++      copy: '複製',
++      refresh: '重新整理',
++      moreActions: '更多動作',
++      branchNewChat: '在新聊天中分支',
++      react: '回應',
++      dismissError: '关闭错误',
++      errorLayers: {
++        auth: '認證錯誤',
++        billing: '額度不足',
++        disk: '磁碟已滿',
++        endpoint: '自訂端點錯誤',
++        gateway: '閘道錯誤',
++        generic: '本輪失敗',
++        provider: '模型服務商錯誤',
++        runtime: '本機執行環境錯誤',
++        streaming: '串流連線錯誤'
++      },
++      errorRetry: '重試',
++      errorStartNewSession: '開始新工作階段',
++      errorSwitchProvider: '切換服務商',
++      errorSignInAgain: provider => `重新登入 ${provider}`,
++      errorOauthExpired: provider => `您的 ${provider} 登入已過期或被撤銷。請重新登入以繼續對話。`,
++      errorOpenLogs: '開啟日誌',
++      errorOpenLogsFailed: '無法開啟日誌資料夾',
++      errorOpenDesktopLogs: '開啟桌面端日誌',
++      errorCopyDiagnostics: '複製錯誤詳細資訊',
++      errorSendDiagnostics: '傳送診斷資訊',
++      filesChanged: count => `${count} 個檔案已變更`,
++      reviewChanges: '檢視',
++      readAloudFailed: '朗讀失敗',
++      preparingAudio: '正在準備音訊...',
++      stopReading: '停止朗讀',
++      readAloud: '朗讀',
++      editMessage: '編輯訊息',
++      stop: '停止',
++      restorePrevious: '還原至上一個檢查點',
++      restoreCheckpoint: '還原檢查點',
++      restoreFromHere: '還原檢查點 — 從此提示重新執行',
++      restoreTitle: '還原至此檢查點？',
++      restoreBody: '此提示之後的所有訊息將從對話中移除，並從此處重新執行該提示。',
++      restoreConfirm: '還原並重新執行',
++      restoreNext: '還原至下一個檢查點',
++      goForward: '前進',
++      sendEdited: '傳送編輯後的訊息',
++      attachingFile: '正在附加…'
++    },
++    approval: {
++      gatewayDisconnected: 'Hermes 閘道未連線',
++      sendFailed: '無法傳送核准回應',
++      run: '執行',
++      command: '指令',
++      moreOptions: '更多核准選項',
++      allowSession: '允許本工作階段',
++      alwaysAllowMenu: '一律允許…',
++      jumpToApproval: '需要核准',
++      reject: '拒絕',
++      alwaysTitle: '一律允許此指令？',
++      alwaysDescription: pattern =>
++        `這會將「${pattern}」模式加入永久允許清單（~/.hermes/config.yaml）。Hermes 對類似指令將不再詢問，包括目前工作階段和未來工作階段。`,
++      alwaysAllow: '一律允許'
++    },
++    clarify: {
++      notReady: '澄清請求尚未就緒',
++      gatewayDisconnected: 'Hermes 閘道未連線',
++      sendFailed: '無法傳送澄清回應',
++      loadingQuestion: '正在載入問題…',
++      other: '其他（輸入您的答案）',
++      placeholder: '輸入您的答案…',
++      skip: '略過',
++      skipped: '已略過',
++      continueLabel: '繼續',
++      confirmAndContinueLabel: '確認並繼續',
++      answeredBadge: '已回答',
++      questionProgress: (answered, total) => `已回答 ${answered}/${total}`,
++      lateAnswer: (question, choice) => `關於「${question}」 — 我的回答: ${choice}`,
++      lateAnswerTip: '將此回答起草為後續訊息',
++      lateAnswerHint: '此問題已不再等待回答。選擇一個選項會將其起草為後續訊息。'
++    },
++    tool: {
++      copyCode: '複製程式碼',
++      renderingImage: '正在渲染圖片',
++      copyOutput: '複製輸出',
++      copyCommand: '複製指令',
++      copyContent: '複製內容',
++      copyUrl: '複製 URL',
++      copyResults: '複製結果',
++      copyQuery: '複製查詢',
++      copyFile: '複製檔案',
++      copyPath: '複製路徑',
++      outputAlt: '工具輸出',
++      rawResponse: '原始回應',
++      copyActivity: '複製活動',
++      recoveredOne: '在 1 個失敗步驟後已復原',
++      recoveredMany: count => `在 ${count} 個失敗步驟後已復原`,
++      failedOne: '1 個步驟失敗',
++      failedMany: count => `${count} 個步驟失敗`,
++      statusRunning: '執行中',
++      statusError: '錯誤',
++      statusRecovered: '已復原',
++      statusDone: '完成',
++      memoryWriteNoted: '已記下記憶寫入',
++      actions: {
++        read: '已讀取',
++        reading: '正在讀取',
++        opened: '已開啟',
++        opening: '正在開啟',
++        failedToOpen: '開啟失敗',
++        searched: '已搜尋',
++        searching: '正在搜尋',
++        ran: '已執行',
++        running: '正在執行',
++        ranCode: '已執行程式碼',
++        runningCode: '正在撰寫腳本'
++      },
++      prefixes: {
++        browser: '瀏覽器',
++        web: '網頁'
++      },
++      titleTemplates: {
++        actionCommand: (action, command) => `${action} ${command}`,
++        actionQuoted: (action, value) => `${action}「${value}」`,
++        actionTarget: (action, target) => `${action} ${target}`,
++        prefixedDone: (prefix, action) => `${prefix}${action}`,
++        runningPrefixedTool: (prefix, action) => `正在執行${prefix}${action}`,
++        runningTool: action => `正在執行 ${action}`
++      },
++      inspector: {
++        previewLimit: (count: number) =>
++          `此預覽還隱藏了 ${count.toLocaleString()} 個字元 — 開啟工具詳情以查看可用資料。`,
++        open: '開啟工具詳情',
++        title: '工具詳情',
++        notice: '開啟時可用資料的快照。關閉後重新開啟即可重新整理。無法還原伺服器截斷或未儲存的資料。',
++        search: '在此部分搜尋（區分大小寫）',
++        previousMatch: '上一個符合項目',
++        nextMatch: '下一個符合項目',
++        wrap: '自動換行',
++        copySection: '複製此部分',
++        noMatch: '可用內容中沒有符合項目。',
++        unavailable: '未收到值。',
++        empty: '空字串',
++        serializationFailed: '無法將此值序列化。',
++        previousPage: '上一頁',
++        nextPage: '下一頁',
++        range: (start: number, end: number, total: number) =>
++          `${start.toLocaleString()}–${end.toLocaleString()} / ${total.toLocaleString()}`,
++        sections: {
++          args: '參數',
++          result: '結果',
++          metadata: '中繼資料',
++          command: '命令',
++          stdout: 'stdout',
++          stderr: 'stderr',
++          diff: '差異'
++        }
++      },
++      titles: {
++        browser_click: { done: '已點擊頁面元素', pending: '正在點擊頁面元素', pendingAction: '正在點擊' },
++        browser_fill: { done: '已填寫表單欄位', pending: '正在填寫表單欄位', pendingAction: '正在填寫' },
++        browser_navigate: { done: '已開啟頁面', pending: '正在開啟頁面', pendingAction: '正在開啟' },
++        browser_snapshot: { done: '已擷取頁面快照', pending: '正在擷取頁面快照', pendingAction: '正在擷取' },
++        browser_take_screenshot: { done: '已擷取截圖', pending: '正在擷取截圖', pendingAction: '正在擷取' },
++        browser_type: { done: '已在頁面輸入', pending: '正在頁面輸入', pendingAction: '正在輸入' },
++        clarify: { done: '已提問', pending: '正在提問', pendingAction: '正在提問' },
++        cronjob: { done: 'Cron 工作', pending: '正在安排 Cron 工作', pendingAction: '正在安排' },
++        edit_file: { done: '已編輯檔案', pending: '正在編輯檔案', pendingAction: '正在編輯' },
++        execute_code: { done: '已執行程式碼', pending: '正在撰寫腳本', pendingAction: '正在撰寫腳本' },
++        image_generate: { done: '已生成圖片', pending: '正在生成圖片', pendingAction: '正在生成' },
++        list_files: { done: '已列出檔案', pending: '正在列出檔案', pendingAction: '正在列出' },
++        memory: { done: '已儲存至記憶', pending: '正在儲存至記憶', pendingAction: '正在儲存' },
++        patch: { done: '已修補檔案', pending: '正在修補檔案', pendingAction: '正在修補' },
++        read_file: { done: '已讀取檔案', pending: '正在讀取檔案', pendingAction: '正在讀取' },
++        search_files: { done: '已搜尋檔案', pending: '正在搜尋檔案', pendingAction: '正在搜尋' },
++        session_search_recall: {
++          done: '已搜尋工作階段歷史',
++          pending: '正在搜尋工作階段歷史',
++          pendingAction: '正在搜尋'
++        },
++        terminal: { done: '已執行指令', pending: '正在執行指令', pendingAction: '正在執行' },
++        todo: { done: '已更新待辦', pending: '正在更新待辦', pendingAction: '正在更新' },
++        vision_analyze: { done: '已分析圖片', pending: '正在分析圖片', pendingAction: '正在分析' },
++        web_extract: { done: '已讀取網頁', pending: '正在讀取網頁', pendingAction: '正在讀取' },
++        web_search: { done: '已搜尋網頁', pending: '正在搜尋網頁', pendingAction: '正在搜尋' },
++        write_file: { done: '已編輯檔案', pending: '正在編輯檔案', pendingAction: '正在編輯' }
++      }
++    }
++  },
++
++  prompts: {
++    gatewayDisconnected: 'Hermes 閘道未連線',
++    sudoSendFailed: '無法傳送 sudo 密碼',
++    secretSendFailed: '無法傳送密鑰',
++    sudoTitle: '管理員密碼',
++    sudoDesc: 'Hermes 需要您的 sudo 密碼來執行特權指令。它只會傳送給您的本機代理。',
++    sudoPlaceholder: 'sudo 密碼',
++    secretTitle: '需要密鑰',
++    secretDesc: 'Hermes 需要一個憑證才能繼續。',
++    secretPlaceholder: '密鑰值'
++  },
++
++  desktop: {
++    audioReadFailed: '無法讀取錄製的音訊',
++    sessionUnavailable: '工作階段不可用',
++    createSessionFailed: '無法建立新工作階段',
++    promptFailed: '提示詞傳送失敗',
++    providerCredentialRequired: '傳送第一則訊息前請先新增提供方憑證。',
++    emptySlashCommand: '空的斜線指令',
++    desktopCommands: '桌面端指令',
++    skillCommandsAvailable: count => `${count} 個技能指令可用。`,
++    warningLine: message => `警告：${message}`,
++    yoloArmed: '此聊天已啟用 YOLO',
++    yoloOff: 'YOLO 已關閉',
++    yoloSystem: active => `此工作階段 YOLO ${active ? '已開啟' : '已關閉'}`,
++    yoloTitle: 'YOLO',
++    yoloToggleFailed: '無法切換 YOLO',
++    profileStatus: current => `設定檔：${current}。使用 /profile <name> 或「新工作階段」選擇器在其他設定檔中開始聊天。`,
++    unknownProfile: '未知設定檔',
++    noProfileNamed: (target, available) => `沒有名為「${target}」的設定檔。可用的：${available}`,
++    newChatsProfile: name => `新聊天將使用設定檔 ${name}。`,
++    setProfileFailed: '設定設定檔失敗',
++    sttDisabled: '設定中已停用語音轉文字。',
++    stopFailed: '停止失敗',
++    regenerateFailed: '重新生成失敗',
++    editFailed: '編輯失敗',
++    editTurnUnavailable: '此回合已不在伺服器歷史中（可能已被壓縮移除）。',
++    resumeFailed: '繼續失敗',
++    readOnlyTranscriptTitle: '已以唯讀方式開啟',
++    readOnlyTranscriptBody:
++      '尚無已連線的後端認領這個較早的對話，因此它以唯讀逐字稿方式開啟。歷史紀錄完好；在有後端認領之前無法傳送訊息。',
++    readOnlyTranscriptSendBlocked: '此對話目前以唯讀逐字稿方式開啟——傳送已停用。',
++    resumeStrandedTitle: '無法載入此工作階段',
++    resumeStrandedBody: '與此工作階段的連線失敗，自動重試已停止。請確認閘道正在執行，然後重試。',
++    resumeRetry: '重試',
++    nothingToBranch: '沒有可分支的內容',
++    branchNeedsChat: '分支前請先開始或繼續一個聊天。',
++    sessionBusy: '工作階段忙碌中',
++    branchStopCurrent: '分支此聊天前請先停止目前回合。',
++    branchNoText: '此訊息沒有可用於分支的文字。',
++    branchTitle: n => `草稿：分支 #${n}`,
++    branchFailed: '分支失敗',
++    deleteFailed: '刪除失敗',
++    archived: '已封存',
++    archiveFailed: '封存失敗',
++    cwdChangeFailed: '工作目錄變更失敗',
++    cwdStagedTitle: '工作目錄已暫存',
++    cwdStagedMessage: '重新啟動桌面後端後，工作目錄變更才會套用至此作用中工作階段。',
++    modelSwitchFailed: '模型切換失敗',
++    hydrationSyncing: (profile: string) => `正在同步 ${profile}\u2026`,
++    sessionExported: '工作階段已匯出',
++    sessionExportFailed: '無法匯出工作階段',
++    imageSaved: '圖片已儲存',
++    downloadStarted: '下載已開始',
++    restartToUseSaveImage: '重新啟動 Hermes Desktop 後可使用儲存圖片。',
++    restartToSaveImages: '重新啟動 Hermes Desktop 以儲存圖片',
++    imageDownloadFailed: '圖片下載失敗',
++    openImage: '開啟圖片',
++    downloadImage: '下載圖片',
++    savingImage: '正在儲存圖片',
++    imagePreviewFailed: '圖片預覽失敗',
++    imageAttach: '附加圖片',
++    imageWriteFailed: '無法將圖片寫入磁碟。',
++    imageAttachFailed: '附加圖片失敗',
++    attachImages: '附加圖片',
++    clipboard: '剪貼簿',
++    noClipboardImage: '剪貼簿中沒有圖片',
++    clipboardPasteFailed: '剪貼簿貼上失敗',
++    dropFiles: '拖曳檔案',
++    handoff: {
++      pickPlatform: '選擇目標平台',
++      success: platform => `已移交到 ${platform}。隨時可在此處恢復。`,
++      systemNote: platform => `↻ 已移交到 ${platform} — 隨時可在此處恢復。`,
++      failed: error => `移交失敗：${error}`,
++      timedOut: '等待閘道逾時。`hermes gateway` 是否正在執行？'
++    }
++  },
++
++  errors: {
++    genericFailure: '發生錯誤',
++    boundaryTitle: '介面出現問題',
++    boundaryDesc: '此檢視遇到意外錯誤。您的聊天和設定是安全的。',
++    reloadWindow: '重新載入視窗',
++    openLogs: '開啟記錄'
++  },
++
++  tips: {
++    close: '不再顯示這則提示',
++    items: {
++      'new-session': {
++        title: '從頭開始',
++        text: '新對話擁有獨立的上下文、終端機與工作目錄。'
++      },
++      skills: {
++        title: '教一次就夠',
++        text: '技能是一組說明檔，Hermes 會在需要時自行載入。'
++      },
++      messaging: {
++        title: '離開電腦也能用',
++        text: '接上 Telegram、Discord、Slack 等 — 同一個代理，同一份記憶。'
++      },
++      artifacts: {
++        title: 'Hermes 做過的一切',
++        text: '所有工作階段的圖片、檔案與連結，都彙整在這裡。'
++      },
++      cron: {
++        title: '會自己執行的工作',
++        text: '讓一則提示按小時、按夜間，或依 cron 運算式定時執行。'
++      },
++      'command-palette': {
++        title: '一個輸入框搞定一切',
++        text: '工作階段、設定、技能與指令都能從命令選單找到。'
++      },
++      profiles: {
++        title: '設定檔彼此獨立',
++        text: '每個都是獨立的 Hermes — 自己的金鑰、記憶與工作階段。'
++      },
++      'composer-mentions': {
++        title: '附件與指令',
++        text: '輸入 @ 把檔案帶入對話，輸入 / 執行指令。'
++      },
++      'local-setup': {
++        title: '這台電腦可以本地執行模型',
++        text: '你的硬體可以執行本地模型。對話不離開你的電腦，而且完全免費。',
++        action: '立即設定'
++      },
++      'right-pane': {
++        title: '工作面板',
++        text: '檔案、終端機、審閱與內建瀏覽器都在側邊面板裡。'
++      }
++    }
++  },
++
++  ui: {
++    search: {
++      clear: '清除搜尋'
++    },
++    pagination: {
++      label: '分頁',
++      previous: '上一頁',
++      previousAria: '前往上一頁',
++      next: '下一頁',
++      nextAria: '前往下一頁'
++    },
++    sidebar: {
++      title: '側邊欄',
++      description: '顯示行動裝置側邊欄。',
++      toggle: open => `${open ? '顯示' : '隱藏'}側邊欄`
+     }
+   }
+ } satisfies TranslationOverrides
+diff --git a/apps/desktop/src/i18n/zh.ts b/apps/desktop/src/i18n/zh.ts
+index ee3535cded6bee26ed5e21380aeade43fe364642..fa15623f45b5fd5418195b7a7b2606295a3d6587 100644
+--- a/apps/desktop/src/i18n/zh.ts
++++ b/apps/desktop/src/i18n/zh.ts
+@@ -4634,6 +4634,35 @@ export const zhOverrides = {
+         runningPrefixedTool: (prefix, action) => `正在运行${prefix}${action}`,
+         runningTool: action => `正在运行 ${action}`
+       },
++      inspector: {
++        previewLimit: (count: number) =>
++          `此预览还隐藏了 ${count.toLocaleString()} 个字符 — 打开工具详情以查看可用数据。`,
++        open: '打开工具详情',
++        title: '工具详情',
++        notice: '打开时可用数据的快照。关闭后重新打开即可刷新。无法恢复服务端截断或未保存的数据。',
++        search: '在此部分搜索（区分大小写）',
++        previousMatch: '上一个匹配',
++        nextMatch: '下一个匹配',
++        wrap: '自动换行',
++        copySection: '复制此部分',
++        noMatch: '可用内容中没有匹配项。',
++        unavailable: '未收到值。',
++        empty: '空字符串',
++        serializationFailed: '无法将此值序列化。',
++        previousPage: '上一页',
++        nextPage: '下一页',
++        range: (start: number, end: number, total: number) =>
++          `${start.toLocaleString()}–${end.toLocaleString()} / ${total.toLocaleString()}`,
++        sections: {
++          args: '参数',
++          result: '结果',
++          metadata: '元数据',
++          command: '命令',
++          stdout: 'stdout',
++          stderr: 'stderr',
++          diff: '差异'
++        }
++      },
+       titles: {
+         browser_click: { done: '已点击页面元素', pending: '正在点击页面元素', pendingAction: '正在点击' },
+         browser_fill: { done: '已填写表单字段', pending: '正在填写表单字段', pendingAction: '正在填写' },

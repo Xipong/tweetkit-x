@@ -1,0 +1,7 @@
+upsert	100644	04fc219eb7d920dfe11a4ff48af59549350164df	new	agent/context_breakdown.py
+upsert	100644	d40afea0746ff2de30650239fe130ae1fb57c3a2	source	apps/desktop/src/app/shell/hooks/use-statusbar-items.gauge.test.tsx
+upsert	100644	d44a521c40eb43bda212d754f4b55f2971998fde	source	apps/desktop/src/app/shell/hooks/use-statusbar-items.lifecycle.test.tsx
+upsert	100644	a92ccbe8a268417c0fa325d6d2e66ea5b4a5d57f	new	apps/desktop/src/app/shell/hooks/use-statusbar-items.tsx
+upsert	100644	c54656548f91164cfb44c4c1861a280bfba69acb	source	tests/agent/test_context_display_provenance.py
+upsert	100644	925a8faf5e71e83d573602ac7f0413a11d4ac54e	new	tests/tui_gateway/test_tui_gateway_server.py
+upsert	100644	16163d92ca380193688a288d90a8b4feeaa15b75	new	tui_gateway/server.py

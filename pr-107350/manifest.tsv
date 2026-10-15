@@ -1,0 +1,5 @@
+upsert	100644	agent/codex_responses_adapter.py
+upsert	100644	hermes_cli/cli_agent_setup_mixin.py
+upsert	100644	tests/agent/test_codex_commentary_channels.py
+upsert	100644	tests/agent/test_run_agent_codex_responses.py
+upsert	100644	tests/hermes_cli/test_codex_commentary_channel.py

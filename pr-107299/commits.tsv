@@ -1,0 +1,3 @@
+424323687f2881e0bc81559b5ca0d3b88fb33dd6	ecac27c0af86064c40eeb8097cc20377cf2eee12	Xipong	217837358+Xipong@users.noreply.github.com	feat(desktop): inspect complete available tool inputs and results
+b0449d6afa0a300ad02fd7664653a9b2c00b0678	424323687f2881e0bc81559b5ca0d3b88fb33dd6	Xipong	Cosmiclady@yandex.ru	feat(desktop): improve tool inspector search navigation
+04b12950065c60bffa607c9e35684f1149e90359	b0449d6afa0a300ad02fd7664653a9b2c00b0678	Xipong	Cosmiclady@yandex.ru	test(desktop): cover inspector match navigation

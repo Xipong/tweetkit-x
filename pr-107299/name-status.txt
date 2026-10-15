@@ -1,0 +1,17 @@
+M	apps/desktop/src/components/assistant-ui/thread/index.tsx
+M	apps/desktop/src/components/assistant-ui/tool/fallback-model.test.ts
+M	apps/desktop/src/components/assistant-ui/tool/fallback-model/format.ts
+M	apps/desktop/src/components/assistant-ui/tool/fallback-model/index.ts
+M	apps/desktop/src/components/assistant-ui/tool/fallback.tsx
+A	apps/desktop/src/components/assistant-ui/tool/tool-inspection-dialog.tsx
+A	apps/desktop/src/components/assistant-ui/tool/tool-inspection-model.test.ts
+A	apps/desktop/src/components/assistant-ui/tool/tool-inspection-model.ts
+A	apps/desktop/src/components/assistant-ui/tool/tool-inspection.test.tsx
+A	apps/desktop/src/components/assistant-ui/tool/tool-inspection.tsx
+M	apps/desktop/src/i18n/ar.ts
+M	apps/desktop/src/i18n/en.ts
+M	apps/desktop/src/i18n/ja.ts
+M	apps/desktop/src/i18n/ru.ts
+M	apps/desktop/src/i18n/types.ts
+M	apps/desktop/src/i18n/zh-hant.ts
+M	apps/desktop/src/i18n/zh.ts

@@ -1,0 +1,10 @@
+pr=107350
+title=fix(responses): keep commentary out of reasoning and surface it in CLI
+source_branch=fix/codex-commentary-cli-channel
+expected_head=603a4218662829d812f35f92f34fa22da7edf4aa
+base_branch=main
+base_head=ecac27c0af86064c40eeb8097cc20377cf2eee12
+base_tree=3286140958a4b9d626010749a9f7465cb91d8ebe
+merge_base=fa75692211001f64b2a65557fd498725eb0fe32e
+already_current=false
+new_head=b6b5c817534f756b51f540428fc38fa3808f061c

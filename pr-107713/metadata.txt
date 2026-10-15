@@ -1,0 +1,10 @@
+pr=107713
+title=feat(mcp): share Windows loopback routing across setup, auth and sessions
+source_branch=feat/mcp-wsl-windows-loopback-final-20260910
+expected_head=6344421ee3c50ce81a915c754bc20ef7cab37be6
+base_branch=main
+base_head=ecac27c0af86064c40eeb8097cc20377cf2eee12
+base_tree=3286140958a4b9d626010749a9f7465cb91d8ebe
+merge_base=564aef2946c436500a5e80ee117b66b789b3f99a
+already_current=false
+new_head=1f2fcabca5359054da7e5e8ccf59a09e09f0c19a

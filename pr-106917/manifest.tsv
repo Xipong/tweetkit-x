@@ -1,0 +1,7 @@
+upsert	100644	agent/context_breakdown.py
+upsert	100644	apps/desktop/src/app/shell/hooks/use-statusbar-items.gauge.test.tsx
+upsert	100644	apps/desktop/src/app/shell/hooks/use-statusbar-items.lifecycle.test.tsx
+upsert	100644	apps/desktop/src/app/shell/hooks/use-statusbar-items.tsx
+upsert	100644	tests/agent/test_context_display_provenance.py
+upsert	100644	tests/tui_gateway/test_tui_gateway_server.py
+upsert	100644	tui_gateway/server.py

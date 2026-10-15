@@ -1,0 +1,1 @@
+prefer-pr	tests/hermes_cli/test_codex_commentary_channel.py

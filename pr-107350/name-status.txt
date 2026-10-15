@@ -1,0 +1,5 @@
+M	agent/codex_responses_adapter.py
+M	hermes_cli/cli_agent_setup_mixin.py
+A	tests/agent/test_codex_commentary_channels.py
+M	tests/agent/test_run_agent_codex_responses.py
+A	tests/hermes_cli/test_codex_commentary_channel.py

@@ -1,0 +1,6 @@
+10454b0718cfc9bdf997d6bf7174e947d169b0a4	ecac27c0af86064c40eeb8097cc20377cf2eee12	Xipong	217837358+Xipong@users.noreply.github.com	feat(mcp): reach Windows loopback servers from WSL without LAN exposure
+68251d649b01d0c0d46da4bf7a079aa51570f62a	10454b0718cfc9bdf997d6bf7174e947d169b0a4	Xipong	217837358+Xipong@users.noreply.github.com	feat(mcp): propagate network routing across setup auth and session surfaces
+d48454d6f69fda1f4da3c359f1bb23a5ed76d946	68251d649b01d0c0d46da4bf7a079aa51570f62a	Xipong	Cosmiclady@yandex.ru	style(web): preserve existing dashboard formatting in MCP changes
+32e7b17f6d5c93dc7dfe3195f6f51f70a7fb991e	d48454d6f69fda1f4da3c359f1bb23a5ed76d946	Xipong	217837358+Xipong@users.noreply.github.com	fix(mcp): keep legacy loopback configs in their original namespace
+fd8c20d515dc9918724ffbd74d5374a04b78cb19	32e7b17f6d5c93dc7dfe3195f6f51f70a7fb991e	Xipong	217837358+Xipong@users.noreply.github.com	refactor(mcp): extract dashboard contracts and preserve configuration guidance
+1f2fcabca5359054da7e5e8ccf59a09e09f0c19a	fd8c20d515dc9918724ffbd74d5374a04b78cb19	Xipong	217837358+Xipong@users.noreply.github.com	refactor(mcp): align type and documentation ownership with #107842

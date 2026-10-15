@@ -1,0 +1,5 @@
+upsert	100644	accc787c64b031d45b49b5435c1b53d6b9feab3d	new	agent/codex_responses_adapter.py
+upsert	100644	65b09858a6b421ce41b3c16eedb32172bd53df47	new	hermes_cli/cli_agent_setup_mixin.py
+upsert	100644	03a3f72ea4f580338455f4ddc96939608e66756c	source	tests/agent/test_codex_commentary_channels.py
+upsert	100644	d19c2714cf22d6eca5312a20d763035fd41fa63e	new	tests/agent/test_run_agent_codex_responses.py
+upsert	100644	0fb5c531367798ca8cd7dec51d8b1f04e37eec11	new	tests/hermes_cli/test_codex_commentary_channel.py

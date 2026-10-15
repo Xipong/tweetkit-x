@@ -1,0 +1,11 @@
+M	gateway/platforms/base.py
+M	hermes_cli/cli_voice_mixin.py
+M	hermes_cli/config_defaults.py
+M	hermes_cli/voice.py
+A	tests/tools/test_tts_paragraph_segments.py
+M	tools/neutts_synth.py
+M	tools/tts_text_normalize.py
+M	tools/tts_tool.py
+M	tools/tts_tool_local.py
+A	tools/tts_tool_segments.py
+M	website/docs/user-guide/features/tts.md

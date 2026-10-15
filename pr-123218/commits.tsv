@@ -1,0 +1,3 @@
+870878f944578e5e94ab376826d4add8c38c79c6	cff14a4c621f36e1d30ea2c64457b2cc058f8e0f	Xipong	Cosmiclady@yandex.ru	fix(peer-messaging): retain inbox files until steer accepts them
+ba2c9a29e5d5cf0d932942b20beaabd214ee9249	870878f944578e5e94ab376826d4add8c38c79c6	Xipong	Cosmiclady@yandex.ru	feat(peer-messaging): add project discovery, tool-data inbox and explicit ACK
+27dbf4d9581b57053fac9362dc831bbf72930888	ba2c9a29e5d5cf0d932942b20beaabd214ee9249	Xipong	Cosmiclady@yandex.ru	fix(peer-messaging): validate compression routes and fresh discovery state

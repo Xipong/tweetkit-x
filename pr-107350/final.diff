@@ -1,0 +1,421 @@
+diff --git a/agent/codex_responses_adapter.py b/agent/codex_responses_adapter.py
+index 8d6d9bfe8a5683c3e6deac6b36dad2189716d700..accc787c64b031d45b49b5435c1b53d6b9feab3d 100644
+--- a/agent/codex_responses_adapter.py
++++ b/agent/codex_responses_adapter.py
+@@ -623,7 +623,7 @@ def _chat_messages_to_responses_input(
+     model drop. Legacy items carrying only an endpoint stamp replay on a matching issuer.
+     ``native_compaction_eligible``: THIS request carries ``context_management``; gates both replaying ``compaction``
+     checkpoints and ``prune_pre_checkpoint_items``. Checkpoints persist across model swaps / compression flips / resume,
+-    so without the gate one checkpoint would erase pre-checkpoint history on a model that cannot decrypt it (lossless:
++    so without the gate one checkpoint would erase pre-checkpoint history on a model that cannot decrypt the blob (lossless:
+     local history is never truncated).
+ 
+     Earlier (PR #26644, May 2026) we believed xAI's OAuth/SuperGrok ``/v1/responses`` surface rejected
+@@ -1208,9 +1208,13 @@ class _OutputScan:
+         message_text = _extract_responses_message_text(item)
+         if not message_text:
+             return
+-        # commentary/analysis text is mid-turn narration, never the final answer: route it
+-        # to the reasoning channel; the exact item is still preserved for replay/cache.
+-        (self.reasoning_parts if is_commentary_phase else self.content_parts).append(message_text)
++        # Commentary is user-facing progress, not reasoning or a final answer.
++        # Its exact message item below carries interim delivery and replay/cache;
++        # only the analysis phase belongs in the reasoning channel.
++        if normalized_phase == "analysis":
++            self.reasoning_parts.append(message_text)
++        elif normalized_phase != "commentary":
++            self.content_parts.append(message_text)
+         item_id = getattr(item, "id", None)
+         self.message_items_raw.append(_message_item(
+             [{"type": "output_text", "text": message_text}], status=_normalize_responses_message_status(item_status),
+diff --git a/hermes_cli/cli_agent_setup_mixin.py b/hermes_cli/cli_agent_setup_mixin.py
+index 7302c8a8d6ee8c12825846577aba11623e61fa1e..65b09858a6b421ce41b3c16eedb32172bd53df47 100644
+--- a/hermes_cli/cli_agent_setup_mixin.py
++++ b/hermes_cli/cli_agent_setup_mixin.py
+@@ -229,6 +229,37 @@ def _retire_agent(cli) -> None:
+ class CLIAgentSetupMixin:
+     """Agent construction + session-resume display methods for ``HermesCLI``."""
+ 
++    def _current_interim_assistant_callback(self):
++        """Keep progress narration independent of reasoning visibility, token streaming, and tool progress."""
++        from cli import CLI_CONFIG
++        display = CLI_CONFIG.get("display") or {}
++        if not display.get("interim_assistant_messages", True):
++            return None
++        return self._on_interim_assistant
++
++    def _on_interim_assistant(self, text: str, *, already_streamed: bool = False) -> None:
++        """Render a completed interim in its own assistant box, never inside reasoning.
++
++        Reuse the normal renderer even with token streaming disabled. Settle both
++        boundaries so commentary cannot make the eventual final look already streamed.
++        The agent owns redaction and per-turn delivery deduplication.
++        """
++        if already_streamed or not isinstance(text, str):
++            return
++        # `hermes chat -Q` sets suppress_status_output on the live agent after
++        # construction. Keep its stdout contract without coupling commentary to
++        # tool_progress=off, which is an independent display preference.
++        if getattr(getattr(self, "agent", None), "suppress_status_output", False):
++            return
++        from tools.ansi_strip import sanitize_display_text
++        visible = sanitize_display_text(text).strip()
++        if not visible:
++            return
++        self._flush_reasoning_preview(force=True)
++        self._stream_delta(None)
++        self._stream_delta(visible)
++        self._stream_delta(None)
++
+     def _ensure_runtime_credentials(self) -> bool:
+         """Re-resolve provider credentials before agent use so key rotation / token
+         refresh are picked up without restarting the CLI. False on auth failure."""
+@@ -475,7 +506,7 @@ class CLIAgentSetupMixin:
+                 select_provider_and_model()
+         except (KeyboardInterrupt, EOFError, SystemExit):
+             print()
+-            _cprint(f"  {t('cli.startup.first_run_cancelled')}")
++            _cprint("  Setup cancelled. Run 'hermes model' any time.")
+             return False
+         except Exception as exc:
+             logger.debug("first-run provider setup failed: %s", exc)
+@@ -680,6 +711,7 @@ class CLIAgentSetupMixin:
+                 # The gateway's model-guard refusal is asked like main's own guard; -q cannot answer it.
+                 model_confirm_callback=None if single_query_mode else self._confirm_owner_model_switch,
+                 reasoning_callback=self._current_reasoning_callback(),
++                interim_assistant_callback=self._current_interim_assistant_callback(),
+                 fallback_model=self._fallback_model, thinking_callback=self._on_thinking,
+                 checkpoints_enabled=self.checkpoints_enabled,
+                 checkpoint_max_snapshots=self.checkpoint_max_snapshots,
+diff --git a/tests/agent/test_codex_commentary_channels.py b/tests/agent/test_codex_commentary_channels.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..03a3f72ea4f580338455f4ddc96939608e66756c
+--- /dev/null
++++ b/tests/agent/test_codex_commentary_channels.py
+@@ -0,0 +1,121 @@
++"""Commentary is an assistant message, not a reasoning summary or a final answer."""
++
++from copy import deepcopy
++from types import SimpleNamespace as NS
++
++import pytest
++
++from agent.codex_responses_adapter import (
++    _chat_messages_to_responses_input,
++    _normalize_codex_response,
++)
++
++
++def _message(text, phase, item_id="msg_progress"):
++    return NS(
++        type="message", role="assistant", id=item_id, phase=phase,
++        status="completed", content=[NS(type="output_text", text=text)],
++    )
++
++
++def _reasoning(text="Reasoning summary."):
++    return NS(
++        type="reasoning", id="rs_summary", status="completed",
++        encrypted_content="opaque-replay-state",
++        summary=[NS(type="summary_text", text=text)],
++    )
++
++
++@pytest.mark.parametrize("issuer", [None, "codex_backend", "github_responses", "xai_responses"])
++def test_mixed_response_keeps_commentary_out_of_both_reasoning_and_final(issuer):
++    response = NS(status="completed", output=[
++        _reasoning(),
++        _message("I'll inspect the file.", "commentary"),
++        _message("Analysis summary.", "analysis", "msg_analysis"),
++        _message("The file is correct.", "final_answer", "msg_final"),
++    ])
++    original = deepcopy(response)
++
++    message, finish_reason = _normalize_codex_response(response, issuer_kind=issuer)
++
++    assert finish_reason == "stop"
++    assert message.content == "The file is correct."
++    assert message.reasoning == "Reasoning summary.\n\nAnalysis summary."
++    assert message.reasoning_content is None
++    assert message.reasoning_details is None
++    assert message.codex_message_items == [
++        {
++            "type": "message", "role": "assistant", "status": "completed",
++            "id": item.id, "phase": item.phase,
++            "content": [{"type": "output_text", "text": item.content[0].text}],
++        }
++        for item in response.output if item.type == "message"
++    ]
++    assert message.codex_reasoning_items[0]["encrypted_content"] == "opaque-replay-state"
++    assert response == original
++
++
++@pytest.mark.parametrize("phase", ["commentary", " Commentary ", "COMMENTARY"])
++def test_commentary_only_is_visible_sidecar_not_reasoning_or_final(phase):
++    text = "I'll inspect the file."
++    message, finish_reason = _normalize_codex_response(
++        NS(status="completed", output=[_message(text, phase)], output_text=text),
++        issuer_kind="codex_backend",
++    )
++
++    assert finish_reason == "incomplete"
++    assert message.content == ""
++    assert message.reasoning is None
++    assert message.codex_reasoning_items is None
++    assert message.codex_message_items[0]["phase"] == "commentary"
++    assert message.codex_message_items[0]["content"][0]["text"] == text
++
++
++def test_normalized_commentary_and_encrypted_state_replay_without_reclassification():
++    message, _ = _normalize_codex_response(NS(status="completed", output=[
++        _reasoning(),
++        _message("I'll inspect the file.", "commentary"),
++        _message("The file is correct.", "final_answer", "msg_final"),
++    ]), issuer_kind="codex_backend")
++    history = [
++        {"role": "user", "content": "Check the file."},
++        {"role": "assistant", **vars(message)},
++    ]
++    original = deepcopy(history)
++
++    replay = _chat_messages_to_responses_input(history, current_issuer_kind="codex_backend")
++
++    assert replay == [
++        {"role": "user", "content": "Check the file."},
++        {
++            "type": "reasoning", "encrypted_content": "opaque-replay-state",
++            "summary": [{"type": "summary_text", "text": "Reasoning summary."}],
++        },
++        *message.codex_message_items,
++    ]
++    assert history == original
++
++
++def test_actual_reasoning_is_not_promoted_based_on_user_facing_wording():
++    message, finish_reason = _normalize_codex_response(
++        NS(status="completed", output=[_reasoning("The answer is 42.")]),
++        issuer_kind="codex_backend",
++    )
++
++    assert finish_reason == "incomplete"
++    assert message.content == ""
++    assert message.reasoning == "The answer is 42."
++    assert message.codex_message_items is None
++
++
++def test_xai_response_marker_in_commentary_does_not_turn_progress_into_final():
++    text = "I will inspect <response>the file</response> next."
++    message, finish_reason = _normalize_codex_response(
++        NS(status="completed", output=[_message(text, "commentary")]),
++        issuer_kind="xai_responses",
++    )
++
++    assert finish_reason == "incomplete"
++    assert message.content == ""
++    assert message.reasoning is None
++    assert message.codex_message_items[0]["content"][0]["text"] == text
+diff --git a/tests/agent/test_run_agent_codex_responses.py b/tests/agent/test_run_agent_codex_responses.py
+index 5f7f64351cd0bc2aaf9b3e4cd278a7a69ed3565d..d19c2714cf22d6eca5312a20d763035fd41fa63e 100644
+--- a/tests/agent/test_run_agent_codex_responses.py
++++ b/tests/agent/test_run_agent_codex_responses.py
+@@ -1923,7 +1923,7 @@ def test_normalize_codex_response_marks_commentary_only_message_as_incomplete(mo
+ 
+     assert finish_reason == "incomplete"
+     assert (assistant_message.content or "") == ""
+-    assert "inspect the repository" in (assistant_message.reasoning or "")
++    assert assistant_message.reasoning is None
+     assert assistant_message.codex_message_items
+     assert assistant_message.codex_message_items[0]["phase"] == "commentary"
+     assert "inspect the repository" in assistant_message.codex_message_items[0]["content"][0]["text"]
+@@ -1940,7 +1940,7 @@ def test_normalize_codex_response_does_not_fallback_to_output_text_for_commentar
+ 
+     assert finish_reason == "incomplete"
+     assert (assistant_message.content or "") == ""
+-    assert "call the tool" in (assistant_message.reasoning or "")
++    assert assistant_message.reasoning is None
+     assert assistant_message.codex_message_items[0]["phase"] == "commentary"
+ 
+ 
+diff --git a/tests/hermes_cli/test_codex_commentary_channel.py b/tests/hermes_cli/test_codex_commentary_channel.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..0fb5c531367798ca8cd7dec51d8b1f04e37eec11
+--- /dev/null
++++ b/tests/hermes_cli/test_codex_commentary_channel.py
+@@ -0,0 +1,177 @@
++"""Classic CLI must consume first-class commentary rather than the reasoning fallback."""
++
++from types import SimpleNamespace
++
++import pytest
++
++
++@pytest.fixture
++def cli_shell(monkeypatch, tmp_path):
++    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
++    import cli as cli_mod
++
++    shell = cli_mod.HermesCLI.__new__(cli_mod.HermesCLI)
++    shell.show_reasoning = False
++    shell.show_timestamps = False
++    shell.streaming_enabled = True
++    shell.verbose = False
++    shell.tool_progress_mode = "all"
++    shell.final_response_markdown = "raw"
++    shell._app = None
++    shell._held_status_lines = []
++    shell._reasoning_shown_this_turn = False
++    shell._reset_stream_state()
++    shell._scrollback_box_width = lambda: 100
++    printed = []
++    monkeypatch.setattr(cli_mod, "_cprint", lambda text="", **kwargs: printed.append(str(text)))
++    monkeypatch.setitem(cli_mod.CLI_CONFIG, "display", {})
++    return shell, printed, cli_mod
++
++
++@pytest.mark.parametrize("show_reasoning", [False, True])
++@pytest.mark.parametrize("streaming_enabled", [False, True])
++def test_commentary_renders_as_assistant_independently_of_reasoning_and_streaming(
++    cli_shell, show_reasoning, streaming_enabled,
++):
++    shell, printed, _ = cli_shell
++    shell.show_reasoning = show_reasoning
++    shell.streaming_enabled = streaming_enabled
++    if show_reasoning:
++        shell._stream_reasoning_delta("Reasoning summary.")
++
++    callback = shell._current_interim_assistant_callback()
++    assert callable(callback)
++    callback("I'll inspect the file.")
++
++    output = "\n".join(printed)
++    assert output.count("I'll inspect the file.") == 1
++    # The interim must be a normal response box, not text in the dim reasoning box.
++    assert "╭" in output
++    if show_reasoning:
++        assert output.index("└") < output.index("I'll inspect the file.")
++    else:
++        assert " Reasoning " not in output
++    assert shell._reasoning_box_opened is False
++    assert shell._stream_started is False
++    assert shell._stream_box_opened is False
++    assert shell._stream_box_live is False
++
++    # A subsequent answer must not be swallowed as an already-rendered final.
++    shell._stream_delta("The file is correct.")
++    shell._stream_delta(None)
++    output = "\n".join(printed)
++    assert output.count("I'll inspect the file.") == 1
++    assert output.count("The file is correct.") == 1
++
++
++def test_tool_progress_off_keeps_interim_consumer(cli_shell):
++    shell, printed, _ = cli_shell
++    shell.tool_progress_mode = "off"
++
++    assert callable(shell._current_interim_assistant_callback())
++    assert printed == []
++
++
++def test_parseable_quiet_suppresses_interim_output(cli_shell):
++    shell, printed, _ = cli_shell
++    shell.agent = SimpleNamespace(suppress_status_output=True)
++
++    shell._on_interim_assistant("Must stay out of -Q stdout.")
++
++    assert printed == []
++    assert shell._stream_started is False
++
++
++def test_explicit_interim_opt_out_does_not_install_consumer(cli_shell):
++    shell, printed, cli_mod = cli_shell
++    cli_mod.CLI_CONFIG["display"] = {"interim_assistant_messages": False}
++
++    assert shell._current_interim_assistant_callback() is None
++    assert printed == []
++
++
++def test_already_streamed_interim_is_not_printed_twice(cli_shell):
++    shell, printed, _ = cli_shell
++    shell._stream_delta("Already visible.")
++    shell._on_interim_assistant("Already visible.", already_streamed=True)
++    shell._stream_delta(None)
++
++    assert "\n".join(printed).count("Already visible.") == 1
++
++
++@pytest.mark.parametrize("text", [None, "", " \n\t"])
++def test_empty_interim_does_not_open_a_box(cli_shell, text):
++    shell, printed, _ = cli_shell
++    shell._on_interim_assistant(text)
++    assert printed == []
++    assert shell._stream_started is False
++
++
++def test_interim_sanitizes_terminal_control_sequences(cli_shell):
++    shell, printed, _ = cli_shell
++    shell._on_interim_assistant("\x1b[2JVisible progress.")
++    output = "\n".join(printed)
++    assert "Visible progress." in output
++    assert "\x1b[2J" not in output
++
++
++@pytest.mark.parametrize("streaming_enabled", [False, True])
++def test_init_agent_installs_interim_consumer_even_without_reasoning(cli_shell, monkeypatch, streaming_enabled):
++    shell, _, cli_mod = cli_shell
++    import run_agent
++    import hermes_cli.mcp_startup as mcp_startup
++    import agent.credits_tracker as credits_tracker
++
++    noop = lambda *args, **kwargs: None
++    shell.agent = None
++    shell.model = "gpt-5-codex"
++    shell.streaming_enabled = streaming_enabled
++    shell._session_db = object()
++    shell._resumed = False
++    shell._pending_title = None
++    shell.max_turns = 4
++    shell.enabled_toolsets = []
++    shell.disabled_toolsets = []
++    shell.system_prompt = ""
++    shell.prefill_messages = []
++    shell.reasoning_config = None
++    shell.service_tier = None
++    shell.session_id = "test-commentary"
++    shell._inline_diffs_enabled = False
++    shell.ignore_rules = True
++    shell.pass_session_id = False
++    shell.checkpoints_enabled = False
++    shell.checkpoint_max_snapshots = 1
++    shell.checkpoint_max_total_size_mb = 1
++    shell.checkpoint_max_file_size_mb = 1
++    for name in (
++        "_providers_only", "_providers_ignore", "_providers_order", "_provider_sort",
++        "_provider_require_params", "_provider_data_collection",
++        "_openrouter_min_coding_score", "_fallback_model",
++    ):
++        setattr(shell, name, None)
++    for name in (
++        "finalize_preloaded_skills", "_install_tool_callbacks", "_ensure_tirith_security",
++        "_clarify_callback", "_on_reaction",
++    ):
++        setattr(shell, name, noop)
++    shell._ensure_runtime_credentials = lambda: True
++    monkeypatch.setattr(cli_mod, "_prepare_deferred_agent_startup", noop)
++    monkeypatch.setattr(mcp_startup, "ensure_mcp_discovery_before_agent_build", noop)
++    monkeypatch.setattr(credits_tracker, "seed_credits_at_session_start", noop)
++    # _init_agent updates the process-wide cleanup reference; restore it at teardown.
++    monkeypatch.setattr(cli_mod, "_active_agent_ref", None)
++    captured = {}
++
++    def fake_agent(**kwargs):
++        captured.update(kwargs)
++        return SimpleNamespace()
++
++    monkeypatch.setattr(run_agent, "AIAgent", fake_agent)
++    assert shell._init_agent(runtime_override={
++        "provider": "openai-codex", "api_mode": "codex_responses",
++        "base_url": "https://chatgpt.com/backend-api/codex", "api_key": "test-key",
++    }) is True
++    assert captured["reasoning_callback"] is None
++    assert captured["interim_assistant_callback"] == shell._on_interim_assistant
++    assert (captured["stream_delta_callback"] is not None) is streaming_enabled

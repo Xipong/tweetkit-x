@@ -1,0 +1,10 @@
+pr=123218
+title=feat(peer-messaging): project discovery, tool-data inbox, replies and ACKs
+source_branch=fix/peer-inbox-consume-after-acceptance
+expected_head=27dbf4d9581b57053fac9362dc831bbf72930888
+base_branch=muse-code-inspired/peer-session-messaging
+base_head=cff14a4c621f36e1d30ea2c64457b2cc058f8e0f
+base_tree=fc4628bf1f52e123867b53a72ff66355ba123b3c
+merge_base=cff14a4c621f36e1d30ea2c64457b2cc058f8e0f
+already_current=true
+new_head=27dbf4d9581b57053fac9362dc831bbf72930888

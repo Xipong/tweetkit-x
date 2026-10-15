@@ -1,0 +1,17 @@
+upsert	100644	733d3f3cd9513a8480234c58b8701e7d72812926	new	apps/desktop/src/components/assistant-ui/thread/index.tsx
+upsert	100644	e38a1cfbde59dff1d1d602ec335ae03a8f7afd89	new	apps/desktop/src/components/assistant-ui/tool/fallback-model.test.ts
+upsert	100644	76b85367e0f09fd56c5885b079ad6f7a3651ed59	new	apps/desktop/src/components/assistant-ui/tool/fallback-model/format.ts
+upsert	100644	57619625e731b6e18488d7cd2fd2f89285496c22	new	apps/desktop/src/components/assistant-ui/tool/fallback-model/index.ts
+upsert	100644	2e2118c089aeb33a65f2bbb59cbaf6c4410eba75	new	apps/desktop/src/components/assistant-ui/tool/fallback.tsx
+upsert	100644	5545012a65b2b0ae00a67b33d558597797a5ead1	source	apps/desktop/src/components/assistant-ui/tool/tool-inspection-dialog.tsx
+upsert	100644	10cf3aa7254d294df782cb57b8392a2709da444d	source	apps/desktop/src/components/assistant-ui/tool/tool-inspection-model.test.ts
+upsert	100644	98f2d5e1a492a20f188ac1cd023dce292650a64e	source	apps/desktop/src/components/assistant-ui/tool/tool-inspection-model.ts
+upsert	100644	ff90b23c14fadd94d15756e542d139e23791281c	source	apps/desktop/src/components/assistant-ui/tool/tool-inspection.test.tsx
+upsert	100644	2bc49ec7c3d255ea081cba2a078e0d8c7699bf15	source	apps/desktop/src/components/assistant-ui/tool/tool-inspection.tsx
+upsert	100644	8607b71f98686caae3892248439205d420710990	new	apps/desktop/src/i18n/ar.ts
+upsert	100644	7c66531de53daf5b2804d90b87430948ee63f9c7	new	apps/desktop/src/i18n/en.ts
+upsert	100644	d9d9df74618f3f6bb1d21b4773639967afc2f28a	new	apps/desktop/src/i18n/ja.ts
+upsert	100644	2e9fcb8bc8fc6919a185a38a3179f578f3a0396d	new	apps/desktop/src/i18n/ru.ts
+upsert	100644	4ff89dd414b5242a9c7724a54741c8cfe92e23fd	new	apps/desktop/src/i18n/types.ts
+upsert	100644	b52f4ccfdbc2d485ac27e64d26195878e5a3ee65	new	apps/desktop/src/i18n/zh-hant.ts
+upsert	100644	fa15623f45b5fd5418195b7a7b2606295a3d6587	new	apps/desktop/src/i18n/zh.ts

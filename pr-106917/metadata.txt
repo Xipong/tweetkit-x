@@ -1,0 +1,10 @@
+pr=106917
+title=fix(desktop): update context usage during tool turns without stale snapshots
+source_branch=fix/desktop-live-context-usage
+expected_head=72e532ed9c4ec8789a40ef94e422c1e742bd8c81
+base_branch=main
+base_head=ecac27c0af86064c40eeb8097cc20377cf2eee12
+base_tree=3286140958a4b9d626010749a9f7465cb91d8ebe
+merge_base=ecfcbb62762a0ae25ddc1172bcb87e5279379dcc
+already_current=false
+new_head=a2dbe3a54f36a8a5ce41d3f437f6efce630b9d1f

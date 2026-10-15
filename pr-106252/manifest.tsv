@@ -1,0 +1,11 @@
+upsert	100644	gateway/platforms/base.py
+upsert	100644	hermes_cli/cli_voice_mixin.py
+upsert	100644	hermes_cli/config_defaults.py
+upsert	100644	hermes_cli/voice.py
+upsert	100644	tests/tools/test_tts_paragraph_segments.py
+upsert	100644	tools/neutts_synth.py
+upsert	100644	tools/tts_text_normalize.py
+upsert	100644	tools/tts_tool.py
+upsert	100644	tools/tts_tool_local.py
+upsert	100644	tools/tts_tool_segments.py
+upsert	100644	website/docs/user-guide/features/tts.md

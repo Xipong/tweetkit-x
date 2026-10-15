@@ -1,0 +1,2 @@
+ef523b84cce8919cfca330f622845acbc9d9dffd	ecac27c0af86064c40eeb8097cc20377cf2eee12	Xipong	Cosmiclady@yandex.ru	fix(tts): preserve local paragraph pauses as explicit speech segments
+a33ad8d5d9feb024ab13ee70d3f0ddf85a80b71c	ef523b84cce8919cfca330f622845acbc9d9dffd	Xipong	Cosmiclady@yandex.ru	test(tts): skip optional numpy-dependent local engine checks

@@ -1,0 +1,3 @@
+eb7ab3fecd97a54a347a0ef45d650163f58cbc67	ecac27c0af86064c40eeb8097cc20377cf2eee12	Albert.Zhou	57474+albert748@users.noreply.github.com	fix(desktop): show live streamed context gauge during turns (frozen-gauge fix)
+bc3e5d702a27b899f671fdb930063e66ca649159	eb7ab3fecd97a54a347a0ef45d650163f58cbc67	Xipong	217837358+Xipong@users.noreply.github.com	fix(desktop): invalidate idle context snapshots across turns
+a2dbe3a54f36a8a5ce41d3f437f6efce630b9d1f	bc3e5d702a27b899f671fdb930063e66ca649159	Xipong	217837358+Xipong@users.noreply.github.com	fix(gateway): stream anchored context growth between tool calls

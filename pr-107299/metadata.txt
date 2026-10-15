@@ -1,0 +1,10 @@
+pr=107299
+title=feat(desktop): inspect complete available tool inputs and results
+source_branch=feat/desktop-tool-details-inspector-20260910
+expected_head=d82c1dbb53ae6ca240b70f6bbfaa672208b29aec
+base_branch=main
+base_head=ecac27c0af86064c40eeb8097cc20377cf2eee12
+base_tree=3286140958a4b9d626010749a9f7465cb91d8ebe
+merge_base=16a408534c4c2364e8e8f14ea7cef82aa80b4505
+already_current=false
+new_head=04b12950065c60bffa607c9e35684f1149e90359
