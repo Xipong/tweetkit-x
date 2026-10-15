@@ -1,0 +1,184 @@
+name: Hermes Rebase Workbench
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/hermes-rebase-workbench.yml
+  issues:
+    types: [opened, reopened]
+
+permissions:
+  contents: write
+  issues: read
+
+concurrency:
+  group: hermes-rebase-workbench-20261015
+  cancel-in-progress: false
+
+jobs:
+  rebase:
+    if: github.event_name == 'push' || github.event.issue.title == 'Hermes rebase workbench 2026-10-15'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Rebase branches and publish resolved snapshots
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OUTPUT_REPO: Xipong/tweetkit-x
+          OUTPUT_BRANCH: hermes-rebase-output-20261015
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          root="$RUNNER_TEMP/hermes-rebase"
+          repo="$root/repo"
+          out="$root/output"
+          mkdir -p "$repo" "$out"
+
+          git config --global user.name "Xipong"
+          git config --global user.email "217837358+Xipong@users.noreply.github.com"
+          git config --global protocol.version 2
+
+          git -C "$repo" init
+          git -C "$repo" remote add upstream https://github.com/NousResearch/hermes-agent.git
+          git -C "$repo" remote add fork https://github.com/Xipong/hermes-agent.git
+          git -C "$repo" config core.longpaths true
+          git -C "$repo" config rerere.enabled true
+
+          prs=(106252 106917 107299 107350 107713 123218)
+
+          git -C "$repo" fetch --filter=blob:none --no-tags upstream \
+            +refs/heads/main:refs/remotes/upstream/main \
+            +refs/heads/muse-code-inspired/peer-session-messaging:refs/remotes/upstream/muse-code-inspired/peer-session-messaging
+
+          for pr in "${prs[@]}"; do
+            pr_json="$(gh api "repos/NousResearch/hermes-agent/pulls/${pr}")"
+            state="$(jq -r '.state' <<<"$pr_json")"
+            draft="$(jq -r '.draft' <<<"$pr_json")"
+            head_repo="$(jq -r '.head.repo.full_name' <<<"$pr_json")"
+            head_branch="$(jq -r '.head.ref' <<<"$pr_json")"
+            expected_head="$(jq -r '.head.sha' <<<"$pr_json")"
+            base_repo="$(jq -r '.base.repo.full_name' <<<"$pr_json")"
+            base_branch="$(jq -r '.base.ref' <<<"$pr_json")"
+            title="$(jq -r '.title' <<<"$pr_json")"
+
+            test "$state" = open
+            test "$draft" = false
+            test "$head_repo" = Xipong/hermes-agent
+            test "$base_repo" = NousResearch/hermes-agent
+
+            if ! git -C "$repo" show-ref --verify --quiet "refs/remotes/upstream/${base_branch}"; then
+              git -C "$repo" fetch --filter=blob:none --no-tags upstream \
+                "+refs/heads/${base_branch}:refs/remotes/upstream/${base_branch}"
+            fi
+            git -C "$repo" fetch --filter=blob:none --no-tags fork \
+              "+refs/heads/${head_branch}:refs/remotes/fork/pr-${pr}"
+
+            actual_head="$(git -C "$repo" rev-parse "refs/remotes/fork/pr-${pr}")"
+            test "$actual_head" = "$expected_head"
+            base_ref="refs/remotes/upstream/${base_branch}"
+            base_head="$(git -C "$repo" rev-parse "$base_ref")"
+            merge_base="$(git -C "$repo" merge-base "$actual_head" "$base_head")"
+
+            pr_out="$out/pr-${pr}"
+            mkdir -p "$pr_out/files"
+            printf '%s\n' \
+              "pr=${pr}" \
+              "title=${title}" \
+              "source_branch=${head_branch}" \
+              "expected_head=${expected_head}" \
+              "base_branch=${base_branch}" \
+              "base_head=${base_head}" \
+              "merge_base=${merge_base}" \
+              > "$pr_out/metadata.txt"
+
+            git -C "$repo" checkout -B "work-${pr}" "$actual_head"
+            : > "$pr_out/conflict-resolutions.txt"
+
+            if git -C "$repo" merge-base --is-ancestor "$base_head" HEAD; then
+              echo "already_current=true" >> "$pr_out/metadata.txt"
+              : > "$pr_out/rebase.log"
+            else
+              set +e
+              GIT_EDITOR=true git -C "$repo" rebase --rebase-merges --empty=drop -X theirs --onto "$base_head" "$merge_base" \
+                >"$pr_out/rebase.log" 2>&1
+              rc=$?
+              set -e
+
+              while [[ $rc -ne 0 ]] && { test -d "$(git -C "$repo" rev-parse --git-path rebase-merge)" || test -d "$(git -C "$repo" rev-parse --git-path rebase-apply)"; }; do
+                mapfile -d '' conflicts < <(git -C "$repo" diff --name-only --diff-filter=U -z)
+                if [[ ${#conflicts[@]} -eq 0 ]]; then
+                  cat "$pr_out/rebase.log" >&2
+                  echo "Rebase stopped without unmerged paths for PR ${pr}" >&2
+                  exit 60
+                fi
+
+                for path in "${conflicts[@]}"; do
+                  if git -C "$repo" cat-file -e ":3:${path}" 2>/dev/null; then
+                    git -C "$repo" checkout --theirs -- "$path"
+                    git -C "$repo" add -- "$path"
+                    printf 'prefer-pr\t%s\n' "$path" >> "$pr_out/conflict-resolutions.txt"
+                  else
+                    git -C "$repo" rm -f --ignore-unmatch -- "$path"
+                    printf 'accept-pr-delete\t%s\n' "$path" >> "$pr_out/conflict-resolutions.txt"
+                  fi
+                done
+
+                if git -C "$repo" diff --cached --quiet; then
+                  set +e
+                  GIT_EDITOR=true git -C "$repo" rebase --skip >>"$pr_out/rebase.log" 2>&1
+                  rc=$?
+                  set -e
+                else
+                  set +e
+                  GIT_EDITOR=true git -C "$repo" rebase --continue >>"$pr_out/rebase.log" 2>&1
+                  rc=$?
+                  set -e
+                fi
+              done
+
+              if [[ $rc -ne 0 ]]; then
+                cat "$pr_out/rebase.log" >&2
+                exit "$rc"
+              fi
+              echo "already_current=false" >> "$pr_out/metadata.txt"
+            fi
+
+            new_head="$(git -C "$repo" rev-parse HEAD)"
+            echo "new_head=${new_head}" >> "$pr_out/metadata.txt"
+            git -C "$repo" diff --check "$base_head"...HEAD
+            git -C "$repo" diff --name-status -M "$base_head"...HEAD > "$pr_out/name-status.txt"
+            git -C "$repo" log --reverse --format='%H%x09%P%x09%an%x09%ae%x09%s' "$base_head"..HEAD > "$pr_out/commits.tsv"
+            git -C "$repo" diff --binary --full-index "$base_head"...HEAD > "$pr_out/final.diff"
+
+            : > "$pr_out/manifest.tsv"
+            while IFS= read -r -d '' path; do
+              entry="$(git -C "$repo" ls-tree HEAD -- "$path")"
+              if [[ -z "$entry" ]]; then
+                printf 'delete\t-\t%s\n' "$path" >> "$pr_out/manifest.tsv"
+                continue
+              fi
+              mode="${entry%% *}"
+              mkdir -p "$pr_out/files/$(dirname "$path")"
+              git -C "$repo" show "HEAD:${path}" > "$pr_out/files/${path}"
+              printf 'upsert\t%s\t%s\n' "$mode" "$path" >> "$pr_out/manifest.tsv"
+            done < <(git -C "$repo" diff --name-only -z "$base_head"...HEAD)
+          done
+
+          publish="$root/publish"
+          git init "$publish"
+          cp -a "$out"/. "$publish"/
+          git -C "$publish" add -A
+          git -C "$publish" commit -m "chore: publish Hermes rebase snapshots 2026-10-15"
+          git -C "$publish" remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${OUTPUT_REPO}.git"
+          git -C "$publish" push --force origin "HEAD:refs/heads/${OUTPUT_BRANCH}"
+
+      - name: Upload resolved snapshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-rebase-output-20261015
+          path: ${{ runner.temp }}/hermes-rebase/output
+          if-no-files-found: error
+          retention-days: 2
